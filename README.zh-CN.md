@@ -13,26 +13,20 @@
 - 支持 GitHub 登录及数据同步
 - 默认缓存时长为 30 分钟，登录用户可强制刷新获取最新数据
 - 根据内容源更新频率动态调整抓取间隔（最快每 2 分钟），避免频繁抓取导致 IP 被封禁
-- 支持 MCP server
+- 内置面向内网部署的 Streamable HTTP MCP server
 
-```json
-{
-  "mcpServers": {
-    "newsnow": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "newsnow-mcp-server"
-      ],
-      "env": {
-        "BASE_URL": "https://newsnow.busiyi.world"
-      }
-    }
-  }
-}
+```text
+POST http://你的内网-NewsNow-地址:4444/mcp
+Authorization: Bearer <MCP_INTERNAL_TOKEN>
 ```
 
-你可以将 `BASE_URL` 修改为你的域名。
+内置 MCP 为无会话 Streamable HTTP，提供 `list_news_sources`、
+`get_hottest_latest_news` 和 `get_industry_news`。请配置
+`MCP_INTERNAL_TOKEN`；使用主机名接入时还需配置 `MCP_ALLOWED_HOSTS`。
+stdio 仅保留作本地调试，可运行 `pnpm --silent mcp:stdio`。
+
+完整的本地部署、MCP Inspector 测试和云服务器部署步骤见
+[NewsNow MCP 本地测试与云端部署](./docs/mcp-deployment.zh-CN.md)。
 
 ## 部署指南
 
@@ -40,6 +34,8 @@
 无需登录和缓存功能时，可直接部署至 Cloudflare Pages 或 Vercel：
 1. Fork 本仓库
 2. 导入至目标平台
+
+行业分类、后台刷新和内置 MCP 面向带持久化 `.data` 目录的 Node/Docker 部署。
 
 ### Cloudflare Pages 配置
 - 构建命令：`pnpm run build`

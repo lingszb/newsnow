@@ -10,11 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as IndustryIndexRouteImport } from './routes/industry.index'
+import { Route as IndustryIndustryRouteImport } from './routes/industry.$industry'
 import { Route as CColumnRouteImport } from './routes/c.$column'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndustryIndexRoute = IndustryIndexRouteImport.update({
+  id: '/industry/',
+  path: '/industry/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndustryIndustryRoute = IndustryIndustryRouteImport.update({
+  id: '/industry/$industry',
+  path: '/industry/$industry',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CColumnRoute = CColumnRouteImport.update({
@@ -26,27 +38,35 @@ const CColumnRoute = CColumnRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/c/$column': typeof CColumnRoute
+  '/industry/$industry': typeof IndustryIndustryRoute
+  '/industry/': typeof IndustryIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/c/$column': typeof CColumnRoute
+  '/industry/$industry': typeof IndustryIndustryRoute
+  '/industry': typeof IndustryIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/c/$column': typeof CColumnRoute
+  '/industry/$industry': typeof IndustryIndustryRoute
+  '/industry/': typeof IndustryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/c/$column'
+  fullPaths: '/' | '/c/$column' | '/industry/$industry' | '/industry/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/c/$column'
-  id: '__root__' | '/' | '/c/$column'
+  to: '/' | '/c/$column' | '/industry/$industry' | '/industry'
+  id: '__root__' | '/' | '/c/$column' | '/industry/$industry' | '/industry/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CColumnRoute: typeof CColumnRoute
+  IndustryIndustryRoute: typeof IndustryIndustryRoute
+  IndustryIndexRoute: typeof IndustryIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -56,6 +76,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/industry/': {
+      id: '/industry/'
+      path: '/industry'
+      fullPath: '/industry/'
+      preLoaderRoute: typeof IndustryIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/industry/$industry': {
+      id: '/industry/$industry'
+      path: '/industry/$industry'
+      fullPath: '/industry/$industry'
+      preLoaderRoute: typeof IndustryIndustryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/c/$column': {
@@ -71,6 +105,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CColumnRoute: CColumnRoute,
+  IndustryIndustryRoute: IndustryIndustryRoute,
+  IndustryIndexRoute: IndustryIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

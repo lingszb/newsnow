@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router"
-import { useIsFetching } from "@tanstack/react-query"
+import { useIsFetching, useQueryClient } from "@tanstack/react-query"
+import { useRouterState } from "@tanstack/react-router"
 import type { SourceID } from "@shared/types"
 import { NavBar } from "../navbar"
 import { Menu } from "./menu"
@@ -26,10 +27,23 @@ function Github() {
 function Refresh() {
   const currentSources = useAtomValue(currentSourcesAtom)
   const { refresh } = useRefetch()
-  const refreshAll = useCallback(() => refresh(...currentSources), [refresh, currentSources])
+  const queryClient = useQueryClient()
+  const industryActive = useRouterState({
+    select: state => state.location.pathname.startsWith("/industry"),
+  })
+  const refreshAll = useCallback(() => {
+    if (industryActive) {
+      return queryClient.invalidateQueries({
+        predicate: query => ["industry-news", "industries", "industry-status"].includes(String(query.queryKey[0])),
+      })
+    }
+    return refresh(...currentSources)
+  }, [currentSources, industryActive, queryClient, refresh])
 
   const isFetching = useIsFetching({
     predicate: (query) => {
+      if (industryActive)
+        return ["industry-news", "industries", "industry-status"].includes(String(query.queryKey[0]))
       const [type, id] = query.queryKey as ["source" | "entire", SourceID]
       return (type === "source" && currentSources.includes(id)) || type === "entire"
     },

@@ -13,24 +13,18 @@
 - GitHub OAuthログインとデータ同期
 - デフォルトのキャッシュ期間は30分（ログインユーザーは強制更新可能）
 - リソース使用を最適化し、IPブロックを防ぐためのソース更新頻度に基づく適応型スクレイピング間隔（最短2分）
-- MCPサーバーをサポート
+- 内部デプロイ向けの Streamable HTTP MCPサーバーを内蔵
 
-```json
-{
-  "mcpServers": {
-    "newsnow": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "newsnow-mcp-server"
-      ],
-      "env": {
-        "BASE_URL": "https://newsnow.busiyi.world"
-      }
-    }
-  }
-}
+```text
+POST http://your-internal-newsnow-host:4444/mcp
+Authorization: Bearer <MCP_INTERNAL_TOKEN>
 ```
+
+内蔵MCPはステートレスな Streamable HTTP で、
+`list_news_sources`、`get_hottest_latest_news`、`get_industry_news`
+を提供します。`MCP_INTERNAL_TOKEN` と、ホスト名を使用する場合は
+`MCP_ALLOWED_HOSTS` を設定してください。stdio はローカルデバッグ専用で、
+`pnpm --silent mcp:stdio` で実行できます。
 
 ## デプロイ
 
@@ -38,6 +32,9 @@
 ログインとキャッシュ機能なしでデプロイする場合：
 1. このリポジトリをフォーク
 2. Cloudflare PagesやVercelなどのプラットフォームにインポート
+
+業界分類、バックグラウンド更新、内蔵MCPは、永続化された `.data`
+ボリュームを持つ Node/Docker デプロイを対象としています。
 
 ### Cloudflare Pages設定
 - ビルドコマンド：`pnpm run build`

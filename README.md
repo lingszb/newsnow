@@ -14,25 +14,17 @@ English | [简体中文](README.zh-CN.md) | [日本語](README.ja-JP.md)
 - GitHub OAuth login with data synchronization
 - 30-minute default cache duration (logged-in users can force refresh)
 - Adaptive scraping interval (minimum 2 minutes) based on source update frequency to optimize resource usage and prevent IP bans
-- support MCP server
+- Built-in Streamable HTTP MCP server for internal deployments
 
-```json
-{
-  "mcpServers": {
-    "newsnow": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "newsnow-mcp-server"
-      ],
-      "env": {
-        "BASE_URL": "https://newsnow.busiyi.world"
-      }
-    }
-  }
-}
+```text
+POST http://your-internal-newsnow-host:4444/mcp
+Authorization: Bearer <MCP_INTERNAL_TOKEN>
 ```
-You can change the `BASE_URL` to your own domain.
+
+The built-in MCP endpoint is stateless and exposes `list_news_sources`,
+`get_hottest_latest_news`, and `get_industry_news`. Configure
+`MCP_INTERNAL_TOKEN` and, when using a hostname, `MCP_ALLOWED_HOSTS`. The stdio
+transport is retained only for local debugging with `pnpm --silent mcp:stdio`.
 
 ## Deployment
 
@@ -42,6 +34,9 @@ For deployments without login and caching:
 
 1. Fork this repository
 2. Import to platforms like Cloudflare Page or Vercel
+
+Industry classification, background refresh, and the built-in MCP endpoint
+target the Node/Docker deployment with a persistent `.data` volume.
 
 ### Cloudflare Page Configuration
 
