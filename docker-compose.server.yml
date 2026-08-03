@@ -1,0 +1,34 @@
+# 服务器部署版：直接拉取云端二开镜像，不本地构建
+# 用法：cp example.env.server .env && docker compose -f docker-compose.server.yml up -d
+services:
+  newsnow:
+    image: ghcr.io/lingszb/newsnow:main
+    container_name: newsnow
+    # 直开端口。如需内网反代，改回 127.0.0.1:4444:4444，由 Nginx/Caddy 对外提供 HTTPS
+    ports:
+      - '4444:4444'
+    volumes:
+      - newsnow_data:/usr/app/.data
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4444
+      - NODE_ENV=production
+      - G_CLIENT_ID=
+      - G_CLIENT_SECRET=
+      - JWT_SECRET=
+      - INIT_TABLE=true
+      - ENABLE_CACHE=true
+      - PRODUCTHUNT_API_TOKEN=
+      - NEWS_CLASSIFIER_ENABLED=${NEWS_CLASSIFIER_ENABLED:-false}
+      - NEWS_CLASSIFIER_ENDPOINT=${NEWS_CLASSIFIER_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
+      - NEWS_CLASSIFIER_API_KEY=${NEWS_CLASSIFIER_API_KEY:-}
+      - NEWS_CLASSIFIER_MODEL=${NEWS_CLASSIFIER_MODEL:-qwen3.6-flash-2026-04-16}
+      - NEWS_CLASSIFICATION_VERSION=${NEWS_CLASSIFICATION_VERSION:-industry-v1}
+      - MCP_INTERNAL_TOKEN=${MCP_INTERNAL_TOKEN:-}
+      - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-newsnow}
+      - MCP_ALLOWED_ORIGINS=${MCP_ALLOWED_ORIGINS:-}
+    restart: unless-stopped
+
+volumes:
+  newsnow_data:
+    name: newsnow_data
