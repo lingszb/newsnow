@@ -1,4 +1,4 @@
-import type { NewsItem, SourceID, SourceResponse } from "@shared/types"
+import type { NewsItem, SourceFetchMethod, SourceID, SourceResponse } from "@shared/types"
 import { useQuery } from "@tanstack/react-query"
 import { AnimatePresence, motion, useInView } from "framer-motion"
 import { useWindowSize } from "react-use"
@@ -103,6 +103,13 @@ function NewsCard({ id, setHandleRef }: NewsCardProps) {
   })
 
   const { isFocused, toggleFocus } = useFocusWith(id)
+  const productHuntProvenance = data?.items?.[0]?.productHunt?.provenance
+  const fetchMethod = data?.items?.[0]?.fetchMethod
+    ?? (productHuntProvenance === "producthunt-api"
+      ? "api"
+      : productHuntProvenance === "producthunt-rss"
+        ? "rss"
+        : sources[id].fetchMethod)
 
   return (
     <>
@@ -126,6 +133,7 @@ function NewsCard({ id, setHandleRef }: NewsCardProps) {
                 {sources[id].name}
               </span>
               {sources[id]?.title && <span className={$("text-sm", `color-${sources[id].color} bg-base op-80 bg-op-50! px-1 rounded`)}>{sources[id].title}</span>}
+              <FetchMethodBadge method={fetchMethod} />
             </span>
             <span className="text-xs op-70"><UpdatedTime isError={isError} updatedTime={data?.updatedTime} /></span>
           </span>
@@ -167,6 +175,26 @@ function NewsCard({ id, setHandleRef }: NewsCardProps) {
         </div>
       </OverlayScrollbar>
     </>
+  )
+}
+
+const fetchMethodMetadata: Record<SourceFetchMethod, { label: string, title: string, className: string }> = {
+  "api": { label: "API", title: "调用方式：公开 API", className: "text-green-600 bg-green-500/10" },
+  "rss": { label: "RSS", title: "调用方式：RSS Feed", className: "text-amber-600 bg-amber-500/10" },
+  "rsshub": { label: "RSSHub", title: "调用方式：RSSHub", className: "text-orange-600 bg-orange-500/10" },
+  "html": { label: "HTML", title: "调用方式：抓取网页 HTML", className: "text-blue-600 bg-blue-500/10" },
+  "json-feed": { label: "JSON Feed", title: "调用方式：JSON Feed", className: "text-violet-600 bg-violet-500/10" },
+}
+
+function FetchMethodBadge({ method }: { method: SourceFetchMethod }) {
+  const metadata = fetchMethodMetadata[method]
+  return (
+    <span
+      className={$("text-xs font-semibold px-1.5 py-0.5 rounded", metadata.className)}
+      title={metadata.title}
+    >
+      {metadata.label}
+    </span>
   )
 }
 

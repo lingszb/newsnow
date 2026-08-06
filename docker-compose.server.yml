@@ -18,7 +18,7 @@ services:
       - JWT_SECRET=
       - INIT_TABLE=true
       - ENABLE_CACHE=true
-      - PRODUCTHUNT_API_TOKEN=
+      - PRODUCTHUNT_API_TOKEN=${PRODUCTHUNT_API_TOKEN:-}
       - NEWS_CLASSIFIER_ENABLED=${NEWS_CLASSIFIER_ENABLED:-false}
       - NEWS_CLASSIFIER_ENDPOINT=${NEWS_CLASSIFIER_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
       - NEWS_CLASSIFIER_API_KEY=${NEWS_CLASSIFIER_API_KEY:-}

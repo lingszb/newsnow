@@ -3,6 +3,7 @@ import type { columns, fixedColumnIds } from "./metadata"
 import type { originSources } from "./pre-sources"
 
 export type Color = "primary" | Exclude<keyof typeof colors, "current" | "inherit" | "transparent" | "black" | "white">
+export type SourceFetchMethod = "api" | "rss" | "rsshub" | "html" | "json-feed"
 
 type ConstSources = typeof originSources
 type MainSourceID = keyof(ConstSources)
@@ -55,6 +56,7 @@ export interface OriginSource extends Partial<Omit<Source, "name" | "redirect">>
 
 export interface Source {
   name: string
+  fetchMethod: SourceFetchMethod
   /**
    * 刷新的间隔时间
    */
@@ -90,6 +92,20 @@ export interface NewsItem {
   url: string
   mobileUrl?: string
   pubDate?: number | string
+  fetchMethod?: SourceFetchMethod
+  productHunt?: {
+    period: "daily" | "weekly" | "monthly"
+    periodKey: string
+    leaderboardUrl: string
+    timezone: "America/Los_Angeles"
+    provenance: "producthunt-api" | "producthunt-rss"
+    capturedAt: string
+    leaderboardRank?: number
+    votesCount?: number
+    commentsCount?: number
+    thumbnailUrl?: string
+    publishedAt?: string
+  }
   extra?: {
     hover?: string
     date?: number | string

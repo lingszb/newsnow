@@ -32,6 +32,7 @@ export default defineSource(async () => {
       title: item.title,
       url: item.url,
       pubDate: item.publishedAt ?? undefined,
+      fetchMethod: "api",
       extra: {
         hover: item.summary ?? undefined,
         info: item.category ? `${item.source} · ${item.category}` : item.source,

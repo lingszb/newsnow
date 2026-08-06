@@ -4,6 +4,7 @@ import { industryCodes, industryDefinitions } from "@shared/industry"
 import type { IndustryCode } from "@shared/industry"
 import type { NewsRepository, PendingArticle } from "#/database/news"
 import { getNewsRepository } from "#/database/news"
+import { getNewsSettingsRepository } from "#/database/settings"
 
 const BATCH_SIZE = 20
 const CONFIDENCE_THRESHOLD = 0.60
@@ -59,6 +60,15 @@ export function getClassifierConfig(): ClassifierConfig {
   }
 }
 
+export async function getResolvedClassifierConfig(): Promise<ClassifierConfig> {
+  const config = getClassifierConfig()
+  const settings = await getNewsSettingsRepository()
+  return {
+    ...config,
+    model: await settings.getClassifierModel(config.model),
+  }
+}
+
 function classifierPrompt(articles: PendingArticle[]) {
   const categoryText = industryDefinitions
     .map(item => `${item.code}: ${item.description}`)
@@ -104,7 +114,7 @@ export class QwenNewsClassifier {
       const response = await this.fetchImpl(this.config.endpoint, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
+          "Authorization": `Bearer ${this.config.apiKey}`,
           "Content-Type": "application/json",
         },
         signal: controller.signal,
@@ -222,7 +232,7 @@ export function requestClassificationProcessing() {
     let processed = 0
     while (classificationRequested) {
       classificationRequested = false
-      const config = getClassifierConfig()
+      const config = await getResolvedClassifierConfig()
       if (!config.enabled || !config.apiKey) continue
       const repository = await getNewsRepository()
       const classifier = new QwenNewsClassifier(config)

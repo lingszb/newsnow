@@ -1,7 +1,7 @@
 import process from "node:process"
 import { Interval } from "./consts"
 import { typeSafeObjectFromEntries } from "./type.util"
-import type { OriginSource, Source, SourceID } from "./types"
+import type { OriginSource, Source, SourceFetchMethod, SourceID } from "./types"
 
 const Time = {
   Test: 1,
@@ -282,6 +282,24 @@ export const originSources = {
     type: "hottest",
     home: "https://www.producthunt.com/",
   },
+  "producthunt-weekly": {
+    name: "Product Hunt",
+    title: "周榜",
+    color: "red",
+    column: "tech",
+    type: "hottest",
+    home: "https://www.producthunt.com/leaderboard/weekly",
+    interval: Time.Slow,
+  },
+  "producthunt-monthly": {
+    name: "Product Hunt",
+    title: "月榜",
+    color: "red",
+    column: "tech",
+    type: "hottest",
+    home: "https://www.producthunt.com/leaderboard/monthly",
+    interval: Time.Slow,
+  },
   "github": {
     name: "Github",
     color: "gray",
@@ -502,6 +520,63 @@ export const originSources = {
   },
 } as const satisfies Record<string, OriginSource>
 
+export const sourceFetchMethods = {
+  "36kr-quick": "html",
+  "36kr-renqi": "html",
+  "aihot": "api",
+  "baidu": "html",
+  "bilibili-hot-search": "api",
+  "bilibili-hot-video": "api",
+  "bilibili-ranking": "api",
+  "cankaoxiaoxi": "api",
+  "chongbuluo-hot": "html",
+  "chongbuluo-latest": "rss",
+  "cls-depth": "api",
+  "cls-hot": "api",
+  "cls-telegraph": "api",
+  "coolapk": "api",
+  "dongqiudi": "api",
+  "douban": "api",
+  "douyin": "api",
+  "fastbull-express": "html",
+  "fastbull-news": "html",
+  "freebuf": "rss",
+  "gelonghui": "html",
+  "github-trending-today": "html",
+  "hackernews": "html",
+  "hupu": "html",
+  "ifeng": "html",
+  "iqiyi-hot-ranklist": "api",
+  "ithome": "html",
+  "jin10": "api",
+  "juejin": "api",
+  "kaopu": "html",
+  "kuaishou": "html",
+  "mktnews-flash": "api",
+  "nowcoder": "api",
+  "pcbeta-windows11": "rss",
+  "producthunt": "api",
+  "producthunt-monthly": "api",
+  "producthunt-weekly": "api",
+  "qqvideo-tv-hotsearch": "api",
+  "solidot": "rss",
+  "sputniknewscn": "html",
+  "sspai": "api",
+  "steam": "html",
+  "tencent-hot": "api",
+  "thepaper": "api",
+  "tieba": "api",
+  "toutiao": "api",
+  "v2ex-share": "json-feed",
+  "wallstreetcn-hot": "api",
+  "wallstreetcn-news": "api",
+  "wallstreetcn-quick": "api",
+  "weibo": "html",
+  "xueqiu-hotstock": "api",
+  "zaobao": "html",
+  "zhihu": "api",
+} as const satisfies Partial<Record<SourceID, SourceFetchMethod>>
+
 export function genSources() {
   const _: [SourceID, Source][] = []
 
@@ -518,6 +593,8 @@ export function genSources() {
     }
     if (source.sub && Object.keys(source.sub).length) {
       Object.entries(source.sub).forEach(([subId, subSource], i) => {
+        const sourceId = `${id}-${subId}` as SourceID
+        const fetchMethod = sourceFetchMethods[sourceId as keyof typeof sourceFetchMethods]
         if (i === 0) {
           _.push([
             id,
@@ -525,10 +602,11 @@ export function genSources() {
               redirect: `${id}-${subId}`,
               ...parent,
               ...subSource,
+              fetchMethod,
             },
           ] as [any, Source])
         }
-        _.push([`${id}-${subId}`, { ...parent, ...subSource }] as [
+        _.push([sourceId, { ...parent, ...subSource, fetchMethod }] as [
           any,
           Source,
         ])
@@ -539,6 +617,7 @@ export function genSources() {
         {
           title: source.title,
           ...parent,
+          fetchMethod: sourceFetchMethods[id as keyof typeof sourceFetchMethods],
         },
       ])
     }

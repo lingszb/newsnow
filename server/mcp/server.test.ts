@@ -1,9 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { afterEach, describe, expect, it } from "vitest"
-import { createNewsNowMcpServer } from "./server"
+import type { SourceResponse } from "@shared/types"
+import { createNewsNowMcpServer, resolveMcpSourceId } from "./server"
 
-describe("NewsNow MCP tools", () => {
+describe("newsNow MCP tools", () => {
   const openServers: Array<ReturnType<typeof createNewsNowMcpServer>> = []
   const openClients: Client[] = []
 
@@ -12,9 +13,9 @@ describe("NewsNow MCP tools", () => {
     await Promise.all(openServers.splice(0).map(server => server.close()))
   })
 
-  async function connect() {
+  async function connect(sourceResponse?: SourceResponse) {
     const server = createNewsNowMcpServer({
-      getSourceFeed: async () => ({
+      getSourceFeed: async () => sourceResponse ?? ({
         status: "success",
         id: "zhihu",
         updatedTime: Date.now(),
@@ -93,5 +94,72 @@ describe("NewsNow MCP tools", () => {
       arguments: { industry: "INVALID" },
     })
     expect(result.isError).toBe(true)
+  })
+
+  it("resolves a unique source name while preserving source ids", async () => {
+    expect(resolveMcpSourceId("zhihu")).toBe("zhihu")
+    expect(resolveMcpSourceId("知乎")).toBe("zhihu")
+
+    const client = await connect()
+    const hottest = await client.callTool({
+      name: "get_hottest_latest_news",
+      arguments: { id: "知乎", count: 1 },
+    })
+    expect(hottest.structuredContent).toMatchObject({ sourceId: "zhihu" })
+  })
+
+  it("adds Product Hunt metadata only for Product Hunt sources", async () => {
+    const client = await connect({
+      status: "success",
+      id: "producthunt-weekly",
+      updatedTime: Date.now(),
+      items: [{
+        id: "product-1",
+        title: "Product One",
+        url: "https://www.producthunt.com/posts/product-one",
+        extra: {
+          hover: "A useful product",
+          info: " △︎ 120",
+        },
+        productHunt: {
+          period: "weekly",
+          periodKey: "2026-W32",
+          leaderboardUrl: "https://www.producthunt.com/leaderboard/weekly/2026/32",
+          timezone: "America/Los_Angeles",
+          provenance: "producthunt-api",
+          capturedAt: "2026-08-06T12:00:00.000Z",
+          leaderboardRank: 1,
+          votesCount: 120,
+          commentsCount: 8,
+          thumbnailUrl: "https://ph-files.example/product-one.png",
+          publishedAt: "2026-08-04T08:00:00.000Z",
+        },
+      }],
+    })
+
+    const hottest = await client.callTool({
+      name: "get_hottest_latest_news",
+      arguments: { id: "producthunt-weekly", count: 1 },
+    })
+
+    expect(hottest.structuredContent).toMatchObject({
+      sourceId: "producthunt-weekly",
+      productHunt: {
+        period: "weekly",
+        periodKey: "2026-W32",
+        provenance: "producthunt-api",
+      },
+      items: [{
+        title: "Product One",
+        rank: 1,
+        summary: "A useful product",
+        productHunt: {
+          leaderboardRank: 1,
+          votesCount: 120,
+          commentsCount: 8,
+          thumbnailUrl: "https://ph-files.example/product-one.png",
+        },
+      }],
+    })
   })
 })

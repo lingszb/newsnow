@@ -1,7 +1,7 @@
 import { getCacheTable } from "#/database/cache"
 import { getNewsRepository } from "#/database/news"
 import { requestClassificationProcessing } from "#/services/news-classifier"
-import { refreshableSourceIds, refreshSourceNow } from "#/services/news-refresh"
+import { refreshSourceNow, refreshableSourceIds } from "#/services/news-refresh"
 import {
   markRefreshCompleted,
   markRefreshSkipped,
@@ -37,10 +37,13 @@ export async function runBackgroundRefresh() {
     let failedSources = 0
     try {
       const ids = refreshableSourceIds()
+      const now = Date.now()
       const cacheTable = await getCacheTable()
+      const deletedCaches = cacheTable ? await cacheTable.cleanup(now) : 0
+      const repository = await getNewsRepository()
+      const deletedArticles = await repository.cleanup(now)
       const caches = cacheTable ? await cacheTable.getEntire(ids) : []
       const cacheUpdatedAt = new Map(caches.map(cache => [cache.id, cache.updated]))
-      const now = Date.now()
       const dueIds = ids.filter(id =>
         now - (cacheUpdatedAt.get(id) ?? 0) >= sources[id].interval,
       )
@@ -56,8 +59,7 @@ export async function runBackgroundRefresh() {
       })
 
       await requestClassificationProcessing()
-      const repository = await getNewsRepository()
-      await repository.cleanup()
+      logger.info(`cleanup expired data: ${deletedArticles} articles, ${deletedCaches} caches`)
     } finally {
       markRefreshCompleted(successfulSources, failedSources)
     }

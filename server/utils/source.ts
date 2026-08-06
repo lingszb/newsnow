@@ -19,6 +19,7 @@ export function defineRSSSource(url: string, option?: SourceOption): SourceGette
       url: item.link,
       id: item.link,
       pubDate: !option?.hiddenDate ? item.created : undefined,
+      fetchMethod: "rss" as const,
     }))
   }
 }
@@ -42,6 +43,7 @@ export function defineRSSHubSource(route: string, RSSHubOptions?: RSSHubOption, 
       url: item.url,
       id: item.id ?? item.url,
       pubDate: !sourceOption?.hiddenDate ? item.date_published : undefined,
+      fetchMethod: "rsshub" as const,
     }))
   }
 }

@@ -1,9 +1,9 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useRouterState } from "@tanstack/react-router"
 import { useIsFetching, useQueryClient } from "@tanstack/react-query"
-import { useRouterState } from "@tanstack/react-router"
+
 import type { SourceID } from "@shared/types"
 import { NavBar } from "../navbar"
-import { Menu } from "./menu"
+import { Settings } from "./settings"
 import { currentSourcesAtom, goToTopAtom } from "~/atoms"
 
 function GoTop() {
@@ -15,12 +15,6 @@ function GoTop() {
       className={$("i-ph:arrow-fat-up-duotone", ok ? "op-50 btn" : "op-0")}
       onClick={goToTop}
     />
-  )
-}
-
-function Github() {
-  return (
-    <button type="button" title="Github" className="i-ph:github-logo-duotone btn" onClick={() => window.open(Homepage)} />
   )
 }
 
@@ -85,8 +79,7 @@ export function Header() {
       <span className="justify-self-end flex gap-2 items-center text-xl text-primary-600 dark:text-primary">
         <GoTop />
         <Refresh />
-        <Github />
-        <Menu />
+        <Settings />
       </span>
     </>
   )

@@ -3,6 +3,8 @@ import type { NewsItem } from "@shared/types"
 import type { Database } from "db0"
 import type { CacheInfo, CacheRow } from "../types"
 
+const CACHE_RETENTION_MS = 24 * 60 * 60 * 1000
+
 export class Cache {
   private db
   constructor(db: Database) {
@@ -69,6 +71,13 @@ export class Cache {
   async delete(key: string) {
     return await this.db.prepare(`DELETE FROM cache WHERE id = ?`).run(key)
   }
+
+  async cleanup(now = Date.now()) {
+    const result = await this.db.prepare(
+      `DELETE FROM cache WHERE updated < ?`,
+    ).run(now - CACHE_RETENTION_MS) as { changes?: number, meta?: { changes?: number } }
+    return Number(result.changes ?? result.meta?.changes ?? 0)
+  }
 }
 
 export async function getCacheTable() {
@@ -83,3 +92,5 @@ export async function getCacheTable() {
     logger.error("failed to init database ", e)
   }
 }
+
+export { CACHE_RETENTION_MS }

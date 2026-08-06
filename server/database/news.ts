@@ -6,7 +6,7 @@ import type { IndustryArticle, IndustryCode, IndustryCount, IndustrySort } from 
 import { industryByCode, industryDefinitions } from "@shared/industry"
 import { sources } from "@shared/sources"
 
-const RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const RETENTION_MS = 8 * 24 * 60 * 60 * 1000
 
 interface ArticleRow {
   id: string
@@ -130,6 +130,18 @@ export class NewsRepository {
         FOREIGN KEY(article_id) REFERENCES news_article(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS news_source_setting (
+        source_id TEXT PRIMARY KEY,
+        classification_enabled INTEGER NOT NULL DEFAULT 1
+          CHECK(classification_enabled IN (0, 1)),
+        fetch_status TEXT NOT NULL DEFAULT 'NEVER'
+          CHECK(fetch_status IN ('NEVER', 'FETCHING', 'SUCCESS', 'ERROR')),
+        last_fetch_started_at INTEGER,
+        last_fetch_completed_at INTEGER,
+        last_fetch_error TEXT,
+        updated_at INTEGER NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_news_article_last_seen
         ON news_article(last_seen_at);
       CREATE INDEX IF NOT EXISTS idx_news_article_source_time
@@ -139,9 +151,13 @@ export class NewsRepository {
     `)
   }
 
-  async ingest(sourceId: SourceID, items: NewsItem[], now = Date.now()) {
+  async ingest(sourceId: SourceID, items: NewsItem[], now = Date.now(), classificationEnabled = true) {
     let changed = 0
     for (const [index, item] of items.entries()) {
+      const publishedAt = normalizePublishedAt(item.pubDate ?? item.extra?.date)
+      if (publishedAt !== null && publishedAt > 0 && publishedAt < now - RETENTION_MS)
+        continue
+
       const sourceItemId = String(item.id)
       const id = articleId(sourceId, sourceItemId)
       const summary = item.extra?.hover?.trim() || undefined
@@ -164,17 +180,19 @@ export class NewsRepository {
           item.url,
           item.mobileUrl ?? null,
           summary ?? null,
-          normalizePublishedAt(item.pubDate ?? item.extra?.date),
+          publishedAt,
           index + 1,
           now,
           now,
           contentHash,
         )
-        await this.db.prepare(`
-          INSERT INTO news_classification (
-            article_id, status, classification_version, input_hash, retry_count
-          ) VALUES (?, 'PENDING', ?, ?, 0)
-        `).run(id, classificationVersion(), contentHash)
+        if (classificationEnabled) {
+          await this.db.prepare(`
+            INSERT INTO news_classification (
+              article_id, status, classification_version, input_hash, retry_count
+            ) VALUES (?, 'PENDING', ?, ?, 0)
+          `).run(id, classificationVersion(), contentHash)
+        }
         changed += 1
         continue
       }
@@ -189,14 +207,14 @@ export class NewsRepository {
         item.url,
         item.mobileUrl ?? null,
         summary ?? null,
-        normalizePublishedAt(item.pubDate ?? item.extra?.date),
+        publishedAt,
         index + 1,
         now,
         contentHash,
         existing.id,
       )
 
-      if (existing.content_hash !== contentHash) {
+      if (existing.content_hash !== contentHash && classificationEnabled) {
         await this.db.prepare(`
           INSERT INTO news_classification (
             article_id, status, classification_version, input_hash, retry_count
@@ -212,8 +230,8 @@ export class NewsRepository {
             error_message = NULL,
             classified_at = NULL
         `).run(existing.id, classificationVersion(), contentHash)
-        changed += 1
       }
+      if (existing.content_hash !== contentHash) changed += 1
     }
     return changed
   }
@@ -224,6 +242,10 @@ export class NewsRepository {
       FROM news_article a
       INNER JOIN news_classification c ON c.article_id = a.id
       WHERE c.status = 'PENDING' AND c.retry_count < 3
+        AND NOT EXISTS (
+          SELECT 1 FROM news_source_setting s
+          WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+        )
       ORDER BY a.first_seen_at ASC, a.id ASC
       LIMIT ?
     `).all(limit) as PendingArticleRow[] | { results?: PendingArticleRow[] }
@@ -239,7 +261,7 @@ export class NewsRepository {
   async saveClassification(
     article: PendingArticle,
     result: { industry: IndustryCode, confidence: number },
-    options: { model: string, lowConfidence?: boolean, retryAttempted?: boolean } ,
+    options: { model: string, lowConfidence?: boolean, retryAttempted?: boolean },
   ) {
     const errorMessage = options.lowConfidence ? "LOW_CONFIDENCE" : null
     await this.db.prepare(`
@@ -285,15 +307,57 @@ export class NewsRepository {
 
   async classificationCounts() {
     const pending = await this.db.prepare(
-      `SELECT COUNT(*) AS count FROM news_classification WHERE status = 'PENDING'`,
+      `SELECT COUNT(*) AS count
+       FROM news_classification c
+       INNER JOIN news_article a ON a.id = c.article_id
+       WHERE c.status = 'PENDING'
+         AND NOT EXISTS (
+           SELECT 1 FROM news_source_setting s
+           WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+         )`,
     ).get() as { count: number }
     const failed = await this.db.prepare(
-      `SELECT COUNT(*) AS count FROM news_classification WHERE status = 'FAILED'`,
+      `SELECT COUNT(*) AS count
+       FROM news_classification c
+       INNER JOIN news_article a ON a.id = c.article_id
+       WHERE c.status = 'FAILED'
+         AND NOT EXISTS (
+           SELECT 1 FROM news_source_setting s
+           WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+         )`,
     ).get() as { count: number }
     return {
       pending: Number(pending?.count ?? 0),
       failed: Number(failed?.count ?? 0),
     }
+  }
+
+  async enqueueSourceForClassification(sourceId: SourceID) {
+    const result = await this.db.prepare(`
+      SELECT id, content_hash FROM news_article WHERE source_id = ?
+    `).all(sourceId) as Array<Pick<ArticleRow, "id" | "content_hash">> | {
+      results?: Array<Pick<ArticleRow, "id" | "content_hash">>
+    }
+    const articles = rowsFromResult(result)
+    for (const article of articles) {
+      await this.db.prepare(`
+        INSERT INTO news_classification (
+          article_id, status, classification_version, input_hash, retry_count
+        ) VALUES (?, 'PENDING', ?, ?, 0)
+        ON CONFLICT(article_id) DO UPDATE SET
+          industry_code = NULL,
+          confidence = NULL,
+          status = 'PENDING',
+          model_name = NULL,
+          classification_version = excluded.classification_version,
+          input_hash = excluded.input_hash,
+          retry_count = 0,
+          error_message = NULL,
+          classified_at = NULL
+        WHERE news_classification.input_hash <> excluded.input_hash
+      `).run(article.id, classificationVersion(), article.content_hash)
+    }
+    return articles.length
   }
 
   async industryCounts(hours = 24, source?: SourceID, now = Date.now()): Promise<IndustryCount[]> {
@@ -309,6 +373,10 @@ export class NewsRepository {
       INNER JOIN news_classification c ON c.article_id = a.id
       WHERE c.status = 'CLASSIFIED'
         AND COALESCE(a.published_at, a.first_seen_at) >= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM news_source_setting s
+          WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+        )
         ${sourceClause}
       GROUP BY c.industry_code
     `).all(...params) as CountRow[] | { results?: CountRow[] }
@@ -347,6 +415,10 @@ export class NewsRepository {
       WHERE c.status = 'CLASSIFIED'
         AND c.industry_code = ?
         AND COALESCE(a.published_at, a.first_seen_at) >= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM news_source_setting s
+          WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+        )
         ${sourceClause}
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?
@@ -373,16 +445,12 @@ export class NewsRepository {
 
   async cleanup(now = Date.now()) {
     const threshold = now - RETENTION_MS
-    await this.db.prepare(`
-      DELETE FROM news_classification
-      WHERE article_id IN (
-        SELECT id FROM news_article WHERE last_seen_at < ?
-      )
-    `).run(threshold)
     const result = await this.db.prepare(
-      `DELETE FROM news_article WHERE last_seen_at < ?`,
-    ).run(threshold) as { changes?: number }
-    return Number(result.changes ?? 0)
+      `DELETE FROM news_article
+       WHERE first_seen_at < ?
+          OR (published_at IS NOT NULL AND published_at > 0 AND published_at < ?)`,
+    ).run(threshold, threshold) as { changes?: number, meta?: { changes?: number } }
+    return Number(result.changes ?? result.meta?.changes ?? 0)
   }
 
   async getArticle(sourceId: SourceID, sourceItemId: string) {

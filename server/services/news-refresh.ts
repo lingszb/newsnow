@@ -3,6 +3,7 @@ import { sources } from "@shared/sources"
 import { getters } from "#/getters"
 import { getCacheTable } from "#/database/cache"
 import { getNewsRepository } from "#/database/news"
+import { getNewsSettingsRepository } from "#/database/settings"
 import type { CacheInfo } from "#/types"
 import { requestClassificationProcessing } from "#/services/news-classifier"
 
@@ -27,9 +28,11 @@ export function resolveSourceId(value: string | undefined): SourceID {
 
 async function persistArticles(id: SourceID, items: SourceResponse["items"]) {
   try {
+    const settings = await getNewsSettingsRepository()
+    const classificationEnabled = await settings.isClassificationEnabled(id)
     const repository = await getNewsRepository()
-    const changed = await repository.ingest(id, items)
-    if (changed) void requestClassificationProcessing()
+    const changed = await repository.ingest(id, items, Date.now(), classificationEnabled)
+    if (changed && classificationEnabled) void requestClassificationProcessing()
   } catch (error) {
     logger.error(`failed to persist articles for ${id}`, error)
   }
@@ -41,17 +44,26 @@ export function refreshSourceNow(id: SourceID) {
 
   const refresh = (async (): Promise<SourceResponse> => {
     const now = Date.now()
-    const items = (await getters[id]()).slice(0, 30)
-    const cacheTable = await getCacheTable()
-    if (cacheTable && items.length) await cacheTable.set(id, items)
-    if (items.length) await persistArticles(id, items)
-    logger.success(`fetch ${id} latest`)
-    return {
-      status: "success",
-      id,
-      updatedTime: now,
-      items,
-      info,
+    const settings = await getNewsSettingsRepository()
+    await settings.markFetchStarted(id, now)
+    try {
+      const items = (await getters[id]()).slice(0, 30)
+      const cacheTable = await getCacheTable()
+      if (cacheTable && items.length) await cacheTable.set(id, items)
+      if (items.length) await persistArticles(id, items)
+      await settings.markFetchCompleted(id)
+      logger.success(`fetch ${id} latest`)
+      return {
+        status: "success",
+        id,
+        updatedTime: now,
+        items,
+        info,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Source fetch failed"
+      await settings.markFetchFailed(id, message)
+      throw error
     }
   })().finally(() => {
     inFlightSources.delete(id)

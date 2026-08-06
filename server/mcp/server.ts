@@ -1,11 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { industryCodes } from "@shared/industry"
-import type { IndustryCode } from "@shared/industry"
+import { type IndustryCode, type IndustryNewsResponse, type IndustrySort, industryCodes } from "@shared/industry"
 import type { SourceID, SourceResponse } from "@shared/types"
 import { columns } from "@shared/metadata"
 import { sources } from "@shared/sources"
-import type { IndustryNewsResponse, IndustrySort } from "@shared/industry"
 import { typeSafeObjectEntries } from "@shared/type.util"
 
 interface McpDependencies {
@@ -48,6 +46,22 @@ const sourceNewsItemSchema = z.object({
   publishedAt: z.union([z.string(), z.number()]).optional(),
   summary: z.string().optional(),
   rank: z.number().int().positive(),
+  productHunt: z.object({
+    leaderboardRank: z.number().int().positive(),
+    votesCount: z.number().int().nonnegative(),
+    commentsCount: z.number().int().nonnegative(),
+    thumbnailUrl: z.string().optional(),
+    publishedAt: z.string().optional(),
+  }).optional(),
+})
+
+const productHuntLeaderboardSchema = z.object({
+  period: z.enum(["daily", "weekly", "monthly"]),
+  periodKey: z.string(),
+  leaderboardUrl: z.string(),
+  timezone: z.literal("America/Los_Angeles"),
+  provenance: z.enum(["producthunt-api", "producthunt-rss"]),
+  capturedAt: z.string(),
 })
 
 const industryNewsItemSchema = z.object({
@@ -70,6 +84,28 @@ function textAndStructured(structuredContent: Record<string, unknown>, text?: st
     }],
     structuredContent,
   }
+}
+
+function normalizeSourceLookup(value: string) {
+  return value.trim().toLocaleLowerCase().replace(/[\s·._-]+/g, "")
+}
+
+export function resolveMcpSourceId(value: string): SourceID | undefined {
+  const direct = value.trim() as SourceID
+  if (sources[direct] && !sources[direct].redirect) return direct
+  const lookup = normalizeSourceLookup(value)
+  const matches = typeSafeObjectEntries(sources)
+    .filter(([, source]) => !source.redirect)
+    .filter(([, source]) => {
+      const aliases = [
+        source.name,
+        source.title,
+        source.title ? `${source.name} ${source.title}` : undefined,
+      ].filter(Boolean) as string[]
+      return aliases.some(alias => normalizeSourceLookup(alias) === lookup)
+    })
+    .map(([id]) => id)
+  return matches.length === 1 ? matches[0] : undefined
 }
 
 export function createNewsNowMcpServer(dependencies: McpDependencies = defaultDependencies) {
@@ -105,24 +141,26 @@ export function createNewsNowMcpServer(dependencies: McpDependencies = defaultDe
 
   server.registerTool("get_hottest_latest_news", {
     title: "获取来源热点资讯",
-    description: "按 NewsNow 来源 ID 获取最新热点，保留兼容参数 id 和 count。",
+    description: "按 NewsNow 来源 ID 或唯一来源名称获取最新热点；是否参与行业分类不影响此工具。",
     inputSchema: {
       id: z.string().min(1).refine(
-        id => Boolean(sources[id as SourceID] && !sources[id as SourceID].redirect),
-        "Unknown NewsNow source id",
+        id => Boolean(resolveMcpSourceId(id)),
+        "Unknown or ambiguous NewsNow source id/name",
       ),
       count: z.number().int().min(1).max(20).default(10),
     },
     outputSchema: {
       sourceId: z.string(),
       sourceName: z.string(),
+      productHunt: productHuntLeaderboardSchema.optional(),
       items: z.array(sourceNewsItemSchema),
     },
     annotations: {
       readOnlyHint: true,
     },
   }, async ({ id, count }) => {
-    const response = await dependencies.getSourceFeed(id, {
+    const source = resolveMcpSourceId(id)!
+    const response = await dependencies.getSourceFeed(source, {
       latest: true,
       canForceRefresh: true,
     })
@@ -137,10 +175,34 @@ export function createNewsNowMcpServer(dependencies: McpDependencies = defaultDe
         : {}),
       ...(item.extra?.hover ? { summary: item.extra.hover } : {}),
       rank: index + 1,
+      ...(item.productHunt?.leaderboardRank !== undefined
+        ? {
+            productHunt: {
+              leaderboardRank: item.productHunt.leaderboardRank,
+              votesCount: item.productHunt.votesCount ?? 0,
+              commentsCount: item.productHunt.commentsCount ?? 0,
+              ...(item.productHunt.thumbnailUrl ? { thumbnailUrl: item.productHunt.thumbnailUrl } : {}),
+              ...(item.productHunt.publishedAt ? { publishedAt: item.productHunt.publishedAt } : {}),
+            },
+          }
+        : {}),
     }))
+    const productHuntItem = response.items.find(item => item.productHunt)?.productHunt
     const structuredContent = {
       sourceId,
       sourceName: sources[sourceId].name,
+      ...(productHuntItem
+        ? {
+            productHunt: {
+              period: productHuntItem.period,
+              periodKey: productHuntItem.periodKey,
+              leaderboardUrl: productHuntItem.leaderboardUrl,
+              timezone: productHuntItem.timezone,
+              provenance: productHuntItem.provenance,
+              capturedAt: productHuntItem.capturedAt,
+            },
+          }
+        : {}),
       items,
     }
     const text = items.map((item, index) => `${index + 1}. [${item.title}](${item.url})`).join("\n")

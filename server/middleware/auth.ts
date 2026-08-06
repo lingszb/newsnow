@@ -11,13 +11,14 @@ export default defineEventHandler(async (event) => {
     "/api/industries",
     "/api/industry-news",
     "/api/industry-status",
+    "/api/settings",
   ]
   if (["JWT_SECRET", "G_CLIENT_ID", "G_CLIENT_SECRET"].find(k => !process.env[k])) {
     event.context.disabledLogin = true
     if (publicPaths.every(p => !url.pathname.startsWith(p)))
       throw createError({ statusCode: 506, message: "Server not configured, disable login" })
   } else {
-    if (["/api/s", "/api/me"].find(p => url.pathname.startsWith(p))) {
+    if (["/api/s", "/api/me", "/api/settings"].find(p => url.pathname.startsWith(p))) {
       const token = getHeader(event, "Authorization")?.replace(/Bearer\s*/, "")?.trim()
       if (token) {
         try {
