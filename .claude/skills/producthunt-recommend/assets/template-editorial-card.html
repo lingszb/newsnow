@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="indigo-porcelain">
+<head>
+  <meta charset="utf-8">
+  <title>Product Hunt 推荐 · Social Card Set</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    /* =========================================================
+       Editorial Magazine × E-ink — Product Hunt Deck Seed (xhs 3:4 only)
+       ---------------------------------------------------------
+       一个 HTML 里含多个 3:4 小红书页:
+         .poster.xhs  1080×1440
+
+       Theme 切换 via <html data-theme="…">:
+         ink-classic | indigo-porcelain | forest-ink | kraft-paper | dune | midnight-ink
+
+       页面由 scripts/build-deck.mjs 填充到正文 @POSTERS@ 标记处。
+       硬规则:一套卡一个主题;Editorial 靠衬线 + 纸墨 + 结构立住,
+       不用卡片背景;每页留 grain/paper-wash 氛围层;卡面包满 ≥75%。
+       ========================================================= */
+
+    /* ---------- 1. Theme tokens ---------- */
+    :root,
+    [data-theme="ink-classic"] {
+      --paper:     #f3f0e8;
+      --paper-2:   #ebe6da;
+      --ink:       #0a0a0b;
+      --muted:     #68625a;
+      --line:      rgba(10,10,11,.22);
+      --accent:    #111111;
+      --accent-soft: #d8d2c6;
+      --ink-rgb: 10,10,11;
+      --paper-rgb: 243,240,232;
+      --accent-rgb: 17,17,17;
+    }
+    [data-theme="indigo-porcelain"] {
+      --paper:     #f2f4f5;
+      --paper-2:   #e5ebef;
+      --ink:       #0a1f3d;
+      --muted:     #5f6d78;
+      --line:      rgba(10,31,61,.20);
+      --accent:    #315d93;
+      --accent-soft: #d7e1ec;
+      --ink-rgb: 10,31,61;
+      --paper-rgb: 242,244,245;
+      --accent-rgb: 49,93,147;
+    }
+    [data-theme="forest-ink"] {
+      --paper:     #f5f1e8;
+      --paper-2:   #e8dfcf;
+      --ink:       #16251b;
+      --muted:     #5d665d;
+      --line:      rgba(22,37,27,.22);
+      --accent:    #2e6b4f;
+      --accent-soft: #d4dfd2;
+      --ink-rgb: 22,37,27;
+      --paper-rgb: 245,241,232;
+      --accent-rgb: 46,107,79;
+    }
+    [data-theme="kraft-paper"] {
+      --paper:     #eedfc7;
+      --paper-2:   #dfc9a8;
+      --ink:       #2a1e13;
+      --muted:     #755f49;
+      --line:      rgba(42,30,19,.24);
+      --accent:    #9b5a2e;
+      --accent-soft: #d5b58f;
+      --ink-rgb: 42,30,19;
+      --paper-rgb: 238,223,199;
+      --accent-rgb: 155,90,46;
+    }
+    [data-theme="dune"] {
+      --paper:     #f0e6d2;
+      --paper-2:   #ded0b7;
+      --ink:       #1f1a14;
+      --muted:     #6f6557;
+      --line:      rgba(31,26,20,.22);
+      --accent:    #8f7650;
+      --accent-soft: #d4c2a4;
+      --ink-rgb: 31,26,20;
+      --paper-rgb: 240,230,210;
+      --accent-rgb: 143,118,80;
+    }
+    /* Midnight Ink — 唯一官方暗色 Editorial 主题。仅用于本身偏暗的内容。 */
+    [data-theme="midnight-ink"] {
+      --paper:     #0e0d0c;
+      --paper-2:   #1a1714;
+      --ink:       #ece2cf;
+      --muted:     #9a8c75;
+      --line:      rgba(236,226,207,.22);
+      --accent:    #d4a04a;
+      --accent-soft: #3a2a14;
+      --ink-rgb: 236,226,207;
+      --paper-rgb: 14,13,12;
+      --accent-rgb: 212,160,74;
+    }
+
+    /* ---------- 2. Typography stack ---------- */
+    :root {
+      --serif-zh: "Noto Serif SC", "Songti SC", "STSong", serif;
+      --serif-en: "Playfair Display", "Noto Serif SC", serif;
+      --sans-zh: "Noto Sans SC", -apple-system, "PingFang SC", "Microsoft YaHei UI", sans-serif;
+      --sans-en: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      --mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+    }
+
+    /* ---------- 3. Reset & sheet ---------- */
+    *,*::before,*::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: #1a1a1a;
+      font-family: var(--sans-zh);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      padding: 64px 32px;
+    }
+    .sheet {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 48px;
+    }
+
+    /* ---------- 4. Poster board (fixed export size) ---------- */
+    .poster {
+      position: relative;
+      background: var(--paper);
+      color: var(--ink);
+      overflow: hidden;
+      isolation: isolate;
+    }
+    .poster.xhs    { width: 1080px; height: 1440px; }
+    .poster figure { margin: 0; }
+    .poster.xhs .content { padding: 56px 88px 96px; }
+    .content { position: relative; width: 100%; height: 100%; z-index: 2; }
+
+    /* ---------- 5. Background layers (paper grain + wash) ---------- */
+    .grain {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      opacity: .35;
+      mix-blend-mode: multiply;
+      background-image: radial-gradient(rgba(0,0,0,.045) 1px, transparent 1px);
+      background-size: 3px 3px;
+    }
+    .paper-wash {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(var(--ink-rgb),.02), rgba(var(--ink-rgb),.05) 60%, rgba(var(--ink-rgb),.08));
+    }
+    /* Midnight Ink — 翻转 grain 为暖色 screen 斑点,paper-wash 为金辉 + 暗角。 */
+    [data-theme="midnight-ink"] .grain {
+      opacity: .26;
+      mix-blend-mode: screen;
+      background-image: radial-gradient(rgba(255,244,214,.10) 1px, transparent 1px);
+    }
+    [data-theme="midnight-ink"] .paper-wash {
+      background:
+        radial-gradient(80% 50% at 28% 16%, rgba(212,160,74,.12), transparent 64%),
+        radial-gradient(70% 60% at 80% 86%, rgba(60,40,20,.20), transparent 72%),
+        linear-gradient(180deg, rgba(236,226,207,.02), rgba(0,0,0,.32));
+    }
+
+    /* ---------- 6. Typography roles ----------
+       Editorial:轻字重(500 不是 900)、衬线正文、宽字距。克制、专栏感。 */
+    .kicker {
+      font-family: var(--mono);
+      font-size: 21px;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: rgba(var(--ink-rgb), .55);
+      margin: 0 0 18px;
+    }
+    .h-display {
+      font-family: var(--serif-zh);
+      font-weight: 500;
+      font-size: 124px;
+      line-height: 1.06;
+      letter-spacing: .04em;
+      margin: 0 0 24px;
+      color: var(--ink);
+    }
+    .h-xl {
+      font-family: var(--serif-zh);
+      font-weight: 500;
+      font-size: 88px;
+      line-height: 1.10;
+      letter-spacing: .03em;
+      margin: 0 0 24px;
+      color: var(--ink);
+    }
+    .h-md {
+      font-family: var(--serif-zh);
+      font-weight: 500;
+      font-size: 56px;
+      line-height: 1.18;
+      letter-spacing: .02em;
+      margin: 0 0 18px;
+      color: var(--ink);
+    }
+    .h-sub {
+      font-family: var(--serif-en);
+      font-style: italic;
+      font-weight: 400;
+      font-size: 36px;
+      color: var(--muted);
+      margin: 0 0 24px;
+    }
+    .lead {
+      font-family: var(--serif-zh);
+      font-weight: 400;
+      font-size: 28px;
+      line-height: 1.55;
+      color: rgba(var(--ink-rgb), .82);
+      margin: 0 0 24px;
+    }
+    .body {
+      font-family: var(--serif-zh);
+      font-weight: 400;
+      font-size: 24px;
+      line-height: 1.65;
+      color: rgba(var(--ink-rgb), .80);
+      margin: 0 0 18px;
+    }
+    .meta {
+      font-family: var(--mono);
+      font-size: 18px;
+      letter-spacing: .20em;
+      text-transform: uppercase;
+      color: rgba(var(--ink-rgb), .55);
+      margin: 0;
+    }
+    .label {
+      font-family: var(--mono);
+      font-size: 18px;
+      letter-spacing: .20em;
+      text-transform: uppercase;
+      color: rgba(var(--ink-rgb), .55);
+      margin: 0 0 12px;
+    }
+    .pullquote {
+      font-family: var(--serif-zh);
+      font-style: italic;
+      font-weight: 500;
+      font-size: 64px;
+      line-height: 1.28;
+      color: var(--ink);
+      margin: 0;
+    }
+
+    /* ---------- 7. Issue label + page metadata ---------- */
+    .issue-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: var(--mono);
+      font-size: 20px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .issue-row .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .issue-strip {
+      position: absolute;
+      left: 88px;
+      right: 88px;
+      bottom: 56px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 32px;
+      font-family: var(--mono);
+      font-size: 18px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      padding-top: 18px;
+    }
+    .issue-strip span { white-space: nowrap; }
+
+    /* ---------- 8. Layout primitives ---------- */
+    .stack    { display: flex; flex-direction: column; }
+    .gap-1    { gap: 12px; }
+    .gap-2    { gap: 24px; }
+    .gap-3    { gap: 36px; }
+    .gap-4    { gap: 48px; }
+    .gap-5    { gap: 64px; }
+    .row      { display: flex; flex-direction: row; }
+    .col-2    { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+    .col-3    { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; }
+    .col-2-8-4 { display: grid; grid-template-columns: 8fr 4fr; gap: 48px; }
+    .center   { text-align: center; }
+    .grow     { flex: 1; }
+    .rule     { height: 1px; background: var(--line); border: 0; margin: 24px 0; }
+    .rule-accent { height: 2px; background: var(--accent); border: 0; margin: 24px 0; width: 96px; }
+
+    /* ---------- 9. Image containers (standard ratios) ---------- */
+    .frame-img {
+      position: relative;
+      overflow: hidden;
+      background: var(--paper-2);
+      display: block;
+      margin: 0;
+    }
+    .frame-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center 50%;
+      display: block;
+    }
+    .frame-img.fit-contain img { object-fit: contain; }
+    [data-theme="midnight-ink"] .frame-img {
+      background: #18120f;
+      box-shadow: 0 0 0 1px rgba(236,226,207,.10);
+    }
+    .frame-img.r-3x4   { aspect-ratio: 3 / 4; }
+    .frame-img.r-1x1   { aspect-ratio: 1 / 1; }
+    .frame-img.r-4x3   { aspect-ratio: 4 / 3; }
+    .frame-img.r-16x9  { aspect-ratio: 16 / 9; }
+    .frame-img.r-16x10 { aspect-ratio: 16 / 10; }
+    .img-cap {
+      font-family: var(--mono);
+      font-size: 20px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 14px;
+    }
+
+    /* ---------- 9b. Screenshot treatment (.frame-shot) ---------- */
+    .frame-shot {
+      position: relative;
+      overflow: hidden;
+      display: block;
+      margin: 0;
+      background: var(--paper-2);
+      border-radius: 6px;
+    }
+    .frame-shot.corners-sq { border-radius: 0; }
+    .frame-shot.corners-sm { border-radius: 6px; }
+    .frame-shot.shadow-soft { box-shadow: 0 18px 36px -18px rgba(20,18,14,.22), 0 2px 6px rgba(20,18,14,.06); }
+    .frame-shot.bg-paper    { background: var(--paper); }
+    .frame-shot.bg-paper-2  { background: var(--paper-2); }
+    .frame-shot.bg-ink      { background: var(--ink); }
+    .frame-shot.bg-grid {
+      background:
+        linear-gradient(var(--paper-2), var(--paper-2)),
+        repeating-linear-gradient(0deg, var(--line) 0 1px, transparent 1px 48px),
+        repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 48px);
+      background-blend-mode: multiply;
+    }
+    .frame-shot.bg-dot {
+      background-color: var(--paper-2);
+      background-image: radial-gradient(var(--line) 1px, transparent 1px);
+      background-size: 18px 18px;
+    }
+    .frame-shot.inset-none > img { padding: 0; }
+    .frame-shot.inset-sub  { padding: 24px; }
+    .frame-shot.inset-bal  { padding: 56px; }
+    .frame-shot.r-3x4   { aspect-ratio: 3 / 4; }
+    .frame-shot.r-1x1   { aspect-ratio: 1 / 1; }
+    .frame-shot.r-4x3   { aspect-ratio: 4 / 3; }
+    .frame-shot.r-16x9  { aspect-ratio: 16 / 9; }
+    .frame-shot.r-16x10 { aspect-ratio: 16 / 10; }
+    .frame-shot > img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center;
+      display: block;
+      border-radius: inherit;
+    }
+    .frame-shot.fit-cover > img { object-fit: cover; }
+
+    /* ---------- 10. Editorial components ---------- */
+    .ledger { display: flex; flex-direction: column; }
+    .ledger-row {
+      display: grid;
+      grid-template-columns: 96px 1fr auto;
+      gap: 24px;
+      align-items: baseline;
+      padding: 28px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .ledger-row .ledger-nb {
+      font-family: var(--mono);
+      font-size: 28px;
+      color: var(--accent);
+      letter-spacing: .08em;
+    }
+    .ledger-row .ledger-title {
+      font-family: var(--serif-zh);
+      font-weight: 500;
+      font-size: 42px;
+      letter-spacing: .02em;
+      color: var(--ink);
+    }
+    .ledger-row .ledger-note {
+      font-family: var(--serif-zh);
+      font-weight: 400;
+      font-size: 22px;
+      line-height: 1.55;
+      color: rgba(var(--ink-rgb), .72);
+    }
+
+    .pullquote-block {
+      border-left: 3px solid var(--accent);
+      padding: 18px 28px;
+      font-family: var(--serif-zh);
+      font-style: italic;
+      font-size: 36px;
+      line-height: 1.35;
+      color: var(--ink);
+      background: var(--paper-2);
+    }
+
+    /* ---------- 11. Product Hunt 专用 ---------- */
+    /* 产品页头部:logo 块 + 标题/卖点并排,不单独占一栏 */
+    .ph-head {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 48px;
+      align-items: center;
+    }
+    .ph-head.no-logo { grid-template-columns: 1fr; }
+    .ph-logo {
+      width: 280px;
+      height: 280px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: var(--paper-2);
+    }
+    .ph-logo img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      object-position: center;
+      display: block;
+    }
+    .ph-head .h-xl { font-size: 76px; }
+    /* 底部链接行:查看产品(含可见链接) */
+    .ph-link {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: auto;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      font-family: var(--mono);
+      text-decoration: none;
+    }
+    .ph-link .ph-link-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 32px;
+      font-size: 20px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+    .ph-link .ph-url {
+      font-size: 16px;
+      letter-spacing: .04em;
+      text-transform: none;
+      color: var(--muted);
+      word-break: break-all;
+    }
+    .ph-link .arrow { color: var(--accent); font-size: 28px; }
+    .ph-link:hover .ph-link-row { color: var(--accent); }
+
+    /* 统计行:票数 / 评论 */
+    .ph-stat {
+      display: flex;
+      gap: 48px;
+      align-items: baseline;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .ph-stat .num {
+      font-family: var(--serif-zh);
+      font-weight: 500;
+      font-size: 56px;
+      color: var(--ink);
+    }
+    .ph-stat .lbl {
+      font-family: var(--mono);
+      font-size: 20px;
+      letter-spacing: .12em;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <!-- THEME_OVERRIDE
+       Change <html data-theme="…"> above to:
+       ink-classic | indigo-porcelain | forest-ink | kraft-paper | dune | midnight-ink
+  -->
+  <main class="sheet">
+
+    <!-- @POSTERS@ -->
+    <!-- build-deck.mjs 在此注入封面 / 产品页 / 总结页。
+         每页一个 <section class="poster xhs" id="…">,合法 id:
+         xhs-cover / xhs-<rank> / xhs-summary
+         硬规则:一套卡一个主题;每页保留 grain/paper-wash 氛围层;
+         靠衬线 + 结构立住,不用卡片背景;卡面包满 ≥75%。 -->
+
+  </main>
+</body>
+</html>
