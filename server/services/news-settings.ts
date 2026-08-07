@@ -97,8 +97,24 @@ export async function updateNewsSettings(update: NewsSettingsUpdate) {
   let shouldProcessClassifications = false
 
   if (industriesChanged) {
-    await news.requeueAllClassifications(version)
-    shouldProcessClassifications = true
+    const previousCodes = previousIndustries.map(item => item.code)
+    const newCodes = update.industries.map(item => item.code)
+    const removedCodes = previousCodes.filter(code => !newCodes.includes(code))
+    for (const code of removedCodes) {
+      await news.clearIndustryClassifications(code)
+    }
+    const isPureRemoval = update.industries.every(item =>
+      previousIndustries.some(prev =>
+        prev.code === item.code
+        && prev.path === item.path
+        && prev.name === item.name
+        && prev.description === item.description,
+      ),
+    )
+    if (!isPureRemoval) {
+      await news.requeueAllClassifications(version)
+      shouldProcessClassifications = true
+    }
   } else if (!previousClassifierEnabled && update.classifierEnabled) {
     shouldProcessClassifications = true
   }

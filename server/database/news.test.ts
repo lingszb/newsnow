@@ -164,6 +164,21 @@ describe("news repository", () => {
     ])
   })
 
+  it("clears classification for a removed industry without affecting others", async () => {
+    await repository.ingest("zhihu", [
+      { id: "tech-article", title: "科技资讯", url: "https://example.com/tech" },
+      { id: "other-article", title: "其他资讯", url: "https://example.com/other" },
+    ], Date.now())
+    const [techPending, otherPending] = await repository.getPendingClassifications()
+    await repository.saveClassification(techPending, { industry: "TECH", confidence: 0.9 }, { model: "test-model" })
+    await repository.saveClassification(otherPending, { industry: "OTHER", confidence: 0.9 }, { model: "test-model" })
+
+    await expect(repository.clearIndustryClassifications("TECH")).resolves.toBe(1)
+
+    expect((await repository.queryIndustryNews({ industry: "TECH", count: 10, hours: 24, sort: "hot" })).items).toHaveLength(0)
+    expect((await repository.queryIndustryNews({ industry: "OTHER", count: 10, hours: 24, sort: "hot" })).items).toHaveLength(1)
+  })
+
   it("keeps unavailable sources out of classification and industry queries", async () => {
     const item = {
       id: "unavailable-source-article",

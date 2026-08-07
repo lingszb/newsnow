@@ -407,6 +407,15 @@ export class NewsRepository {
     return articles.length
   }
 
+  async clearIndustryClassifications(code: IndustryCode) {
+    const result = await this.db.prepare(`
+      UPDATE news_classification
+      SET industry_code = NULL, confidence = NULL
+      WHERE industry_code = ? AND status = 'CLASSIFIED'
+    `).run(code)
+    return Number(result.changes ?? result.meta?.changes ?? 0)
+  }
+
   async industryCounts(
     hours = 24,
     source?: SourceID,

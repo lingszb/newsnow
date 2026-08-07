@@ -354,8 +354,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                               <button type="button" aria-label={`下移${industry.name || `第 ${index + 1} 项`}`} disabled={index === industries.length - 1} className="btn disabled:op-30" onClick={() => moveIndustry(index, 1)}>
                                 <span className="i-ph:arrow-down-duotone" />
                               </button>
-                              <button type="button" aria-label={`删除${industry.name || `第 ${index + 1} 项`}`} disabled={industries.length <= 2} className="btn color-primary disabled:op-30" onClick={() => setIndustries(current => current.filter((_, itemIndex) => itemIndex !== index))}>
-                                <span className="i-ph:trash-duotone" />
+                              <button type="button" aria-label={`删除${industry.name || `第 ${index + 1} 项`}`} disabled={industries.length <= 2} className="h-9 px-3 rounded-lg border border-color-primary/40 text-sm color-primary cursor-pointer transition-colors hover:bg-color-primary/10 disabled:op-30 disabled:cursor-not-allowed" onClick={() => setIndustries(current => current.filter((_, itemIndex) => itemIndex !== index))}>
+                                删除
                               </button>
                             </div>
                           </div>
