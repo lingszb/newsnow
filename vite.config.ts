@@ -1,5 +1,7 @@
 import { join } from "node:path"
+import process from "node:process"
 import { defineConfig } from "vite"
+import type { Plugin } from "vite"
 import react from "@vitejs/plugin-react-swc"
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
 import unocss from "unocss/vite"
@@ -8,6 +10,34 @@ import dotenv from "dotenv"
 import nitro from "./nitro.config"
 import { projectDir } from "./shared/dir"
 import pwa from "./pwa.config"
+
+function mcpDevPath(): Plugin {
+  return {
+    name: "newsnow-mcp-dev-path",
+    apply: "serve",
+    configureServer(server) {
+      process.env.NEWSNOW_VITE_DEV_MCP = "true"
+      server.middlewares.use((request, _response, next) => {
+        if (
+          request.url === "/mcp"
+          || request.url?.startsWith("/mcp?")
+          || request.url === "/api/mcp"
+          || request.url?.startsWith("/api/mcp?")
+        ) {
+          request.headers["x-newsnow-mcp-dev-remote-address"] = request.socket.remoteAddress ?? ""
+          const accept = request.headers.accept ?? ""
+          request.headers["x-newsnow-mcp-dev-accept-valid"] = String(accept).includes("application/json")
+            && String(accept).includes("text/event-stream")
+            ? "true"
+            : "false"
+        }
+        if (request.url === "/mcp" || request.url?.startsWith("/mcp?"))
+          request.url = `/api${request.url}`
+        next()
+      })
+    },
+  }
+}
 
 dotenv.config({
   path: join(projectDir, ".env.server"),
@@ -21,6 +51,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    mcpDevPath(),
     TanStackRouterVite({
       // error with auto import and vite-plugin-pwa
       // autoCodeSplitting: true,

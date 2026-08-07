@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
     "/api/industries",
     "/api/industry-news",
     "/api/industry-status",
+    "/api/mcp",
     "/api/settings",
   ]
   if (["JWT_SECRET", "G_CLIENT_ID", "G_CLIENT_SECRET"].find(k => !process.env[k])) {

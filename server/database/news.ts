@@ -2,8 +2,8 @@ import { createHash } from "node:crypto"
 import process from "node:process"
 import type { Database } from "db0"
 import type { NewsItem, SourceID } from "@shared/types"
-import type { IndustryArticle, IndustryCode, IndustryCount, IndustrySort } from "@shared/industry"
-import { industryByCode, industryDefinitions } from "@shared/industry"
+import type { IndustryArticle, IndustryCode, IndustryCount, IndustryDefinition, IndustrySort } from "@shared/industry"
+import { industryDefinitions } from "@shared/industry"
 import { sources } from "@shared/sources"
 
 const RETENTION_MS = 8 * 24 * 60 * 60 * 1000
@@ -28,6 +28,7 @@ interface PendingArticleRow {
   title: string
   summary: string | null
   input_hash: string
+  classification_version: string
   retry_count: number
 }
 
@@ -55,6 +56,7 @@ export interface PendingArticle {
   title: string
   summary?: string
   inputHash: string
+  classificationVersion?: string
   retryCount: number
 }
 
@@ -151,7 +153,13 @@ export class NewsRepository {
     `)
   }
 
-  async ingest(sourceId: SourceID, items: NewsItem[], now = Date.now(), classificationEnabled = true) {
+  async ingest(
+    sourceId: SourceID,
+    items: NewsItem[],
+    now = Date.now(),
+    classificationEnabled = true,
+    version = classificationVersion(),
+  ) {
     let changed = 0
     for (const [index, item] of items.entries()) {
       const publishedAt = normalizePublishedAt(item.pubDate ?? item.extra?.date)
@@ -191,7 +199,7 @@ export class NewsRepository {
             INSERT INTO news_classification (
               article_id, status, classification_version, input_hash, retry_count
             ) VALUES (?, 'PENDING', ?, ?, 0)
-          `).run(id, classificationVersion(), contentHash)
+          `).run(id, version, contentHash)
         }
         changed += 1
         continue
@@ -229,7 +237,7 @@ export class NewsRepository {
             retry_count = 0,
             error_message = NULL,
             classified_at = NULL
-        `).run(existing.id, classificationVersion(), contentHash)
+        `).run(existing.id, version, contentHash)
       }
       if (existing.content_hash !== contentHash) changed += 1
     }
@@ -238,13 +246,15 @@ export class NewsRepository {
 
   async getPendingClassifications(limit = 20): Promise<PendingArticle[]> {
     const result = await this.db.prepare(`
-      SELECT a.id, a.title, a.summary, c.input_hash, c.retry_count
+      SELECT a.id, a.title, a.summary, c.input_hash, c.classification_version, c.retry_count
       FROM news_article a
       INNER JOIN news_classification c ON c.article_id = a.id
       WHERE c.status = 'PENDING' AND c.retry_count < 3
-        AND NOT EXISTS (
+        AND EXISTS (
           SELECT 1 FROM news_source_setting s
-          WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+          WHERE s.source_id = a.source_id
+            AND s.classification_enabled = 1
+            AND s.fetch_status = 'SUCCESS'
         )
       ORDER BY a.first_seen_at ASC, a.id ASC
       LIMIT ?
@@ -254,6 +264,7 @@ export class NewsRepository {
       title: row.title,
       summary: row.summary ?? undefined,
       inputHash: row.input_hash,
+      classificationVersion: row.classification_version,
       retryCount: row.retry_count,
     }))
   }
@@ -274,17 +285,18 @@ export class NewsRepository {
         retry_count = retry_count + ?,
         error_message = ?,
         classified_at = ?
-      WHERE article_id = ? AND input_hash = ? AND status = 'PENDING'
+      WHERE article_id = ? AND input_hash = ? AND classification_version = ? AND status = 'PENDING'
     `).run(
       result.industry,
       result.confidence,
       options.model,
-      classificationVersion(),
+      article.classificationVersion ?? classificationVersion(),
       options.retryAttempted || options.lowConfidence ? 1 : 0,
       errorMessage,
       Date.now(),
       article.id,
       article.inputHash,
+      article.classificationVersion ?? classificationVersion(),
     )
   }
 
@@ -295,13 +307,14 @@ export class NewsRepository {
         status = ?,
         retry_count = ?,
         error_message = ?
-      WHERE article_id = ? AND input_hash = ? AND status = 'PENDING'
+      WHERE article_id = ? AND input_hash = ? AND classification_version = ? AND status = 'PENDING'
     `).run(
       nextRetryCount >= 3 ? "FAILED" : "PENDING",
       nextRetryCount,
       message.slice(0, 500),
       article.id,
       article.inputHash,
+      article.classificationVersion ?? classificationVersion(),
     )
   }
 
@@ -311,9 +324,11 @@ export class NewsRepository {
        FROM news_classification c
        INNER JOIN news_article a ON a.id = c.article_id
        WHERE c.status = 'PENDING'
-         AND NOT EXISTS (
+         AND EXISTS (
            SELECT 1 FROM news_source_setting s
-           WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+           WHERE s.source_id = a.source_id
+             AND s.classification_enabled = 1
+             AND s.fetch_status = 'SUCCESS'
          )`,
     ).get() as { count: number }
     const failed = await this.db.prepare(
@@ -321,9 +336,11 @@ export class NewsRepository {
        FROM news_classification c
        INNER JOIN news_article a ON a.id = c.article_id
        WHERE c.status = 'FAILED'
-         AND NOT EXISTS (
+         AND EXISTS (
            SELECT 1 FROM news_source_setting s
-           WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+           WHERE s.source_id = a.source_id
+             AND s.classification_enabled = 1
+             AND s.fetch_status = 'SUCCESS'
          )`,
     ).get() as { count: number }
     return {
@@ -332,7 +349,7 @@ export class NewsRepository {
     }
   }
 
-  async enqueueSourceForClassification(sourceId: SourceID) {
+  async enqueueSourceForClassification(sourceId: SourceID, version = classificationVersion()) {
     const result = await this.db.prepare(`
       SELECT id, content_hash FROM news_article WHERE source_id = ?
     `).all(sourceId) as Array<Pick<ArticleRow, "id" | "content_hash">> | {
@@ -355,12 +372,47 @@ export class NewsRepository {
           error_message = NULL,
           classified_at = NULL
         WHERE news_classification.input_hash <> excluded.input_hash
-      `).run(article.id, classificationVersion(), article.content_hash)
+      `).run(article.id, version, article.content_hash)
     }
     return articles.length
   }
 
-  async industryCounts(hours = 24, source?: SourceID, now = Date.now()): Promise<IndustryCount[]> {
+  async requeueAllClassifications(version = classificationVersion()) {
+    const result = await this.db.prepare(`
+      SELECT a.id, a.content_hash
+      FROM news_article a
+      INNER JOIN news_source_setting s ON s.source_id = a.source_id
+      WHERE s.classification_enabled = 1 AND s.fetch_status = 'SUCCESS'
+    `).all() as Array<Pick<ArticleRow, "id" | "content_hash">> | {
+      results?: Array<Pick<ArticleRow, "id" | "content_hash">>
+    }
+    const articles = rowsFromResult(result)
+    for (const article of articles) {
+      await this.db.prepare(`
+        INSERT INTO news_classification (
+          article_id, status, classification_version, input_hash, retry_count
+        ) VALUES (?, 'PENDING', ?, ?, 0)
+        ON CONFLICT(article_id) DO UPDATE SET
+          industry_code = NULL,
+          confidence = NULL,
+          status = 'PENDING',
+          model_name = NULL,
+          classification_version = excluded.classification_version,
+          input_hash = excluded.input_hash,
+          retry_count = 0,
+          error_message = NULL,
+          classified_at = NULL
+      `).run(article.id, version, article.content_hash)
+    }
+    return articles.length
+  }
+
+  async industryCounts(
+    hours = 24,
+    source?: SourceID,
+    now = Date.now(),
+    definitions: IndustryDefinition[] = industryDefinitions,
+  ): Promise<IndustryCount[]> {
     const params: Array<string | number> = [now - hours * 60 * 60 * 1000]
     let sourceClause = ""
     if (source) {
@@ -373,18 +425,21 @@ export class NewsRepository {
       INNER JOIN news_classification c ON c.article_id = a.id
       WHERE c.status = 'CLASSIFIED'
         AND COALESCE(a.published_at, a.first_seen_at) >= ?
-        AND NOT EXISTS (
+        AND EXISTS (
           SELECT 1 FROM news_source_setting s
-          WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+          WHERE s.source_id = a.source_id
+            AND s.classification_enabled = 1
+            AND s.fetch_status = 'SUCCESS'
         )
         ${sourceClause}
       GROUP BY c.industry_code
     `).all(...params) as CountRow[] | { results?: CountRow[] }
     const counts = new Map(rowsFromResult(result).map(row => [row.industry_code, Number(row.count)]))
-    return industryDefinitions.map(definition => ({
+    return definitions.map(definition => ({
       code: definition.code,
       path: definition.path,
       name: definition.name,
+      description: definition.description,
       count: counts.get(definition.code) ?? 0,
     }))
   }
@@ -415,9 +470,11 @@ export class NewsRepository {
       WHERE c.status = 'CLASSIFIED'
         AND c.industry_code = ?
         AND COALESCE(a.published_at, a.first_seen_at) >= ?
-        AND NOT EXISTS (
+        AND EXISTS (
           SELECT 1 FROM news_source_setting s
-          WHERE s.source_id = a.source_id AND s.classification_enabled = 0
+          WHERE s.source_id = a.source_id
+            AND s.classification_enabled = 1
+            AND s.fetch_status = 'SUCCESS'
         )
         ${sourceClause}
       ORDER BY ${orderBy}
@@ -460,8 +517,11 @@ export class NewsRepository {
   }
 }
 
-export function classificationVersion() {
-  return process.env.NEWS_CLASSIFICATION_VERSION?.trim() || "industry-v1"
+export function classificationVersion(definitions?: IndustryDefinition[]) {
+  const base = process.env.NEWS_CLASSIFICATION_VERSION?.trim() || "industry-v1"
+  if (!definitions) return base
+  const digest = createHash("sha256").update(JSON.stringify(definitions)).digest("hex").slice(0, 12)
+  return `${base}:${digest}`
 }
 
 let repositoryPromise: Promise<NewsRepository> | undefined
@@ -479,4 +539,4 @@ export function resetNewsRepositoryForTests() {
   repositoryPromise = undefined
 }
 
-export { RETENTION_MS, industryByCode }
+export { RETENTION_MS }

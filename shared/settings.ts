@@ -1,4 +1,5 @@
 import type { SourceFetchMethod, SourceID } from "./types"
+import type { IndustryDefinition } from "./industry"
 
 export type SourceFetchStatus = "NEVER" | "FETCHING" | "SUCCESS" | "ERROR"
 
@@ -16,17 +17,24 @@ export interface SourceSettingItem {
 }
 
 export interface NewsSettingsResponse {
+  features: {
+    cacheEnabled: boolean
+  }
   classifier: {
     enabled: boolean
     configured: boolean
     model: string
     version: string
   }
+  industries: IndustryDefinition[]
   sources: SourceSettingItem[]
 }
 
 export interface NewsSettingsUpdate {
+  cacheEnabled: boolean
+  classifierEnabled: boolean
   classifierModel: string
+  industries: IndustryDefinition[]
   sources: Array<{
     id: SourceID
     classificationEnabled: boolean

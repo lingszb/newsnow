@@ -1,3 +1,4 @@
+import process from "node:process"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { createNewsNowMcpServer } from "#/mcp/server"
 import { validateMcpAccess } from "#/mcp/security"
@@ -11,8 +12,17 @@ function jsonRpcError(message: string, code = -32000) {
 }
 
 export default defineEventHandler(async (event) => {
+  const remoteAddress = process.env.NEWSNOW_VITE_DEV_MCP === "true"
+    ? getHeader(event, "x-newsnow-mcp-dev-remote-address")
+    : event.node.req.socket.remoteAddress
+  if (
+    process.env.NEWSNOW_VITE_DEV_MCP === "true"
+    && getHeader(event, "x-newsnow-mcp-dev-accept-valid") === "true"
+  ) {
+    event.node.req.headers.accept = "application/json, text/event-stream"
+  }
   const access = validateMcpAccess({
-    remoteAddress: event.node.req.socket.remoteAddress,
+    remoteAddress,
     host: getHeader(event, "host"),
     origin: getHeader(event, "origin"),
     authorization: getHeader(event, "authorization"),

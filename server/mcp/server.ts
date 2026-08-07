@@ -1,12 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { type IndustryCode, type IndustryNewsResponse, type IndustrySort, industryCodes } from "@shared/industry"
+import type { IndustryCode, IndustryDefinition, IndustryNewsResponse, IndustrySort } from "@shared/industry"
 import type { SourceID, SourceResponse } from "@shared/types"
 import { columns } from "@shared/metadata"
 import { sources } from "@shared/sources"
 import { typeSafeObjectEntries } from "@shared/type.util"
 
 interface McpDependencies {
+  listIndustries: () => Promise<IndustryDefinition[]>
+  listAvailableSourceIds: () => Promise<SourceID[]>
   getSourceFeed: (
     sourceId: string | undefined,
     options?: { latest?: boolean, canForceRefresh?: boolean },
@@ -21,6 +23,14 @@ interface McpDependencies {
 }
 
 const defaultDependencies: McpDependencies = {
+  listIndustries: async () => {
+    const { getResolvedIndustryDefinitions } = await import("#/services/news-classifier")
+    return await getResolvedIndustryDefinitions()
+  },
+  listAvailableSourceIds: async () => {
+    const { getAvailableSourceIds } = await import("#/services/news-settings")
+    return await getAvailableSourceIds()
+  },
   getSourceFeed: async (...args) => {
     const { getSourceFeed } = await import("#/services/news-refresh")
     return await getSourceFeed(...args)
@@ -36,6 +46,13 @@ const sourceSchema = z.object({
   platformName: z.string(),
   listName: z.string().optional(),
   column: z.string().optional(),
+})
+
+const industrySchema = z.object({
+  code: z.string(),
+  path: z.string(),
+  name: z.string(),
+  description: z.string(),
 })
 
 const sourceNewsItemSchema = z.object({
@@ -70,7 +87,7 @@ const industryNewsItemSchema = z.object({
   url: z.string(),
   sourceId: z.string(),
   sourceName: z.string(),
-  industry: z.enum(industryCodes),
+  industry: z.string(),
   rank: z.number().int().positive(),
   publishedAt: z.number(),
   summary: z.string().optional(),
@@ -125,8 +142,9 @@ export function createNewsNowMcpServer(dependencies: McpDependencies = defaultDe
       idempotentHint: true,
     },
   }, async () => {
+    const availableSourceIds = new Set(await dependencies.listAvailableSourceIds())
     const items = typeSafeObjectEntries(sources)
-      .filter(([, source]) => !source.redirect)
+      .filter(([id, source]) => !source.redirect && availableSourceIds.has(id))
       .map(([id]) => {
         const source = sources[id]
         return {
@@ -160,10 +178,14 @@ export function createNewsNowMcpServer(dependencies: McpDependencies = defaultDe
     },
   }, async ({ id, count }) => {
     const source = resolveMcpSourceId(id)!
+    const availableSourceIds = new Set(await dependencies.listAvailableSourceIds())
+    if (!availableSourceIds.has(source)) throw new Error("News source is currently unavailable")
     const response = await dependencies.getSourceFeed(source, {
       latest: true,
       canForceRefresh: true,
     })
+    if (response.status !== "success" || !response.items.length)
+      throw new Error("News source did not return fresh items")
     const sourceId = response.id
     const items = response.items.slice(0, count).map((item, index) => ({
       id: item.id,
@@ -209,17 +231,33 @@ export function createNewsNowMcpServer(dependencies: McpDependencies = defaultDe
     return textAndStructured(structuredContent, text)
   })
 
+  server.registerTool("list_industries", {
+    title: "列出行业分类",
+    description: "返回 NewsNow 当前服务端生效的行业分类（代码、路径、名称、描述），供 get_industry_news 查询使用。行业集合可在设置面板中自定义，每次调用都会读取最新配置。",
+    outputSchema: {
+      industries: z.array(industrySchema),
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+  }, async () => {
+    const definitions = await dependencies.listIndustries()
+    const industries = definitions.map(({ code, path, name, description }) => ({ code, path, name, description }))
+    return textAndStructured({ industries })
+  })
+
   server.registerTool("get_industry_news", {
     title: "获取行业资讯",
     description: "按行业、时间范围和排序获取已完成分类的跨平台资讯。",
     inputSchema: {
-      industry: z.enum(industryCodes),
+      industry: z.string().regex(/^[A-Z][A-Z0-9_]*$/).describe("设置页中配置的行业代码"),
       count: z.number().int().min(1).max(20).default(10),
       hours: z.number().int().min(1).max(168).default(24),
       sort: z.enum(["hot", "latest"]).default("hot"),
     },
     outputSchema: {
-      industry: z.enum(industryCodes),
+      industry: z.string(),
       items: z.array(industryNewsItemSchema),
     },
     annotations: {
@@ -227,6 +265,8 @@ export function createNewsNowMcpServer(dependencies: McpDependencies = defaultDe
       idempotentHint: true,
     },
   }, async ({ industry, count, hours, sort }) => {
+    const industries = await dependencies.listIndustries()
+    if (!industries.some(item => item.code === industry)) throw new Error("Invalid industry")
     const result = await dependencies.queryIndustryNews({
       industry,
       count,

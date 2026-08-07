@@ -1,5 +1,12 @@
 import type { SourceID } from "./types"
 
+export interface IndustryDefinition {
+  code: string
+  path: string
+  name: string
+  description: string
+}
+
 export const industryDefinitions = [
   {
     code: "TECH",
@@ -37,29 +44,27 @@ export const industryDefinitions = [
     name: "其他",
     description: "社会、政务、国际综合及无法归入以上行业的内容",
   },
-] as const
+] satisfies IndustryDefinition[]
 
-export type IndustryCode = (typeof industryDefinitions)[number]["code"]
-export type IndustryPath = (typeof industryDefinitions)[number]["path"]
+export type IndustryCode = string
+export type IndustryPath = string
 export type IndustrySort = "hot" | "latest"
 
-export const industryCodes = industryDefinitions.map(item => item.code) as [
-  IndustryCode,
-  ...IndustryCode[],
-]
+export const industryCodes = industryDefinitions.map(item => item.code)
 
-export function industryFromPath(path: string) {
-  return industryDefinitions.find(item => item.path === path.toLowerCase())
+export function industryFromPath(path: string, definitions: IndustryDefinition[] = industryDefinitions) {
+  return definitions.find(item => item.path === path.toLowerCase())
 }
 
-export function industryByCode(code: IndustryCode) {
-  return industryDefinitions.find(item => item.code === code)!
+export function industryByCode(code: IndustryCode, definitions: IndustryDefinition[] = industryDefinitions) {
+  return definitions.find(item => item.code === code)
 }
 
 export interface IndustryCount {
   code: IndustryCode
   path: IndustryPath
   name: string
+  description: string
   count: number
 }
 

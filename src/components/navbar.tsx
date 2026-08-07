@@ -25,8 +25,7 @@ export function NavBar() {
         更多
       </button>
       <Link
-        to="/industry/$industry"
-        params={{ industry: "tech" }}
+        to="/industry"
         className={$(
           "px-2 hover:(bg-primary/10 rounded-md) cursor-pointer transition-all",
           industryActive ? "color-primary font-bold" : "op-70 dark:op-90",

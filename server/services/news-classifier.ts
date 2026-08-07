@@ -1,26 +1,24 @@
 import process from "node:process"
 import { z } from "zod"
-import { industryCodes, industryDefinitions } from "@shared/industry"
-import type { IndustryCode } from "@shared/industry"
+import { industryDefinitions } from "@shared/industry"
+import type { IndustryCode, IndustryDefinition } from "@shared/industry"
 import type { NewsRepository, PendingArticle } from "#/database/news"
 import { getNewsRepository } from "#/database/news"
 import { getNewsSettingsRepository } from "#/database/settings"
 
 const BATCH_SIZE = 20
 const CONFIDENCE_THRESHOLD = 0.60
-const DEFAULT_TIMEOUT_MS = 15_000
+const DEFAULT_TIMEOUT_MS = 30_000
+const MIN_TIMEOUT_MS = 1_000
+const MAX_TIMEOUT_MS = 120_000
 const DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 const DEFAULT_MODEL = "qwen3.6-flash-2026-04-16"
 
-const classificationResultSchema = z.object({
-  articleId: z.string().min(1),
-  industry: z.enum(industryCodes),
-  confidence: z.number().finite().min(0).max(1),
-}).strict()
+class SplittableClassifierError extends Error {}
 
-const classificationResponseSchema = z.object({
-  results: z.array(classificationResultSchema).min(1).max(BATCH_SIZE),
-}).strict()
+class ClassifierArticleIdError extends SplittableClassifierError {}
+
+class ClassifierTimeoutError extends SplittableClassifierError {}
 
 interface ChatCompletionResponse {
   choices?: Array<{
@@ -50,13 +48,37 @@ export interface NewsClassifier {
   classify: (articles: PendingArticle[]) => Promise<ClassificationResult[]>
 }
 
+function classifierTimeoutMs(value = process.env.NEWS_CLASSIFIER_TIMEOUT_MS) {
+  if (!value?.trim()) return DEFAULT_TIMEOUT_MS
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= MIN_TIMEOUT_MS && parsed <= MAX_TIMEOUT_MS
+    ? parsed
+    : DEFAULT_TIMEOUT_MS
+}
+
+function nonThinkingRequestOptions(model: string) {
+  // MiniMax uses its own thinking switch and does not support JSON mode options.
+  if (model.toLowerCase().includes("minimax")) {
+    return {
+      thinking: { type: "disabled" },
+    }
+  }
+  return {
+    temperature: 0,
+    enable_thinking: false,
+    response_format: {
+      type: "json_object",
+    },
+  }
+}
+
 export function getClassifierConfig(): ClassifierConfig {
   return {
     enabled: process.env.NEWS_CLASSIFIER_ENABLED === "true",
     endpoint: process.env.NEWS_CLASSIFIER_ENDPOINT?.trim() || DEFAULT_ENDPOINT,
     apiKey: process.env.NEWS_CLASSIFIER_API_KEY?.trim() || undefined,
     model: process.env.NEWS_CLASSIFIER_MODEL?.trim() || DEFAULT_MODEL,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
+    timeoutMs: classifierTimeoutMs(),
   }
 }
 
@@ -65,18 +87,27 @@ export async function getResolvedClassifierConfig(): Promise<ClassifierConfig> {
   const settings = await getNewsSettingsRepository()
   return {
     ...config,
+    enabled: await settings.getClassifierEnabled(config.enabled),
     model: await settings.getClassifierModel(config.model),
   }
 }
 
-function classifierPrompt(articles: PendingArticle[]) {
-  const categoryText = industryDefinitions
+export async function getResolvedIndustryDefinitions() {
+  const settings = await getNewsSettingsRepository()
+  return await settings.getIndustryDefinitions(industryDefinitions)
+}
+
+function classifierPrompt(
+  articles: Array<Pick<PendingArticle, "id" | "title" | "summary">>,
+  definitions: IndustryDefinition[],
+) {
+  const categoryText = definitions
     .map(item => `${item.code}: ${item.description}`)
     .join("\n")
   return [
     "请把每条资讯严格归入一个行业，并只返回 JSON。",
     "输出格式：{\"results\":[{\"articleId\":\"原ID\",\"industry\":\"行业代码\",\"confidence\":0到1的小数}]}。",
-    "不得遗漏、增加或修改 articleId；industry 只能使用以下六个代码：",
+    "不得遗漏、增加或修改 articleId；industry 只能使用以下代码：",
     categoryText,
     "资讯输入：",
     JSON.stringify(articles.map(article => ({
@@ -87,19 +118,20 @@ function classifierPrompt(articles: PendingArticle[]) {
   ].join("\n")
 }
 
-function validateArticleIds(articles: PendingArticle[], results: ClassificationResult[]) {
+function validateArticleIds(articles: Array<{ id: string }>, results: ClassificationResult[]) {
   const expectedIds = new Set(articles.map(article => article.id))
   const actualIds = new Set(results.map(result => result.articleId))
   if (actualIds.size !== results.length)
-    throw new Error("Classifier returned duplicate article IDs")
+    throw new ClassifierArticleIdError("Classifier returned duplicate article IDs")
   if (expectedIds.size !== actualIds.size || [...expectedIds].some(id => !actualIds.has(id)))
-    throw new Error("Classifier returned missing or unknown article IDs")
+    throw new ClassifierArticleIdError("Classifier returned missing or unknown article IDs")
 }
 
 export class QwenNewsClassifier {
   constructor(
     private readonly config: ClassifierConfig,
     private readonly fetchImpl: ClassifierFetch = fetch,
+    private readonly definitions: IndustryDefinition[] = industryDefinitions,
   ) {}
 
   async classify(articles: PendingArticle[]): Promise<ClassificationResult[]> {
@@ -108,6 +140,16 @@ export class QwenNewsClassifier {
     if (!this.config.apiKey)
       throw new Error("Classifier API key is not configured")
 
+    const articleIdsByAlias = new Map<string, string>()
+    const promptArticles = articles.map((article, index) => {
+      const alias = String(index)
+      articleIdsByAlias.set(alias, article.id)
+      return {
+        id: alias,
+        title: article.title,
+        ...(article.summary ? { summary: article.summary } : {}),
+      }
+    })
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs)
     try {
@@ -120,12 +162,8 @@ export class QwenNewsClassifier {
         signal: controller.signal,
         body: JSON.stringify({
           model: this.config.model,
-          temperature: 0,
-          enable_thinking: false,
+          ...nonThinkingRequestOptions(this.config.model),
           stream: false,
-          response_format: {
-            type: "json_object",
-          },
           messages: [
             {
               role: "system",
@@ -133,7 +171,7 @@ export class QwenNewsClassifier {
             },
             {
               role: "user",
-              content: classifierPrompt(articles),
+              content: classifierPrompt(promptArticles, this.definitions),
             },
           ],
         }),
@@ -151,14 +189,25 @@ export class QwenNewsClassifier {
       } catch {
         throw new Error("Classifier returned invalid JSON")
       }
+      const allowedIndustries = new Set(this.definitions.map(item => item.code))
+      const classificationResponseSchema = z.object({
+        results: z.array(z.object({
+          articleId: z.string().min(1),
+          industry: z.string().refine(code => allowedIndustries.has(code), "Unknown industry code"),
+          confidence: z.number().finite().min(0).max(1),
+        }).strict()).min(1).max(BATCH_SIZE),
+      }).strict()
       const validated = classificationResponseSchema.safeParse(parsed)
       if (!validated.success)
         throw new Error("Classifier response failed local schema validation")
-      validateArticleIds(articles, validated.data.results)
-      return validated.data.results
+      validateArticleIds(promptArticles, validated.data.results)
+      return validated.data.results.map(result => ({
+        ...result,
+        articleId: articleIdsByAlias.get(result.articleId)!,
+      }))
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError")
-        throw new Error("Classifier request timed out")
+        throw new ClassifierTimeoutError("Classifier request timed out")
       throw error
     } finally {
       clearTimeout(timer)
@@ -170,29 +219,62 @@ function safeErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Classifier request failed"
 }
 
+interface ClassificationAttempt {
+  results: ClassificationResult[]
+  failures: Array<{ article: PendingArticle, error: unknown }>
+}
+
+async function classifyWithSmallerRetry(
+  classifier: NewsClassifier,
+  articles: PendingArticle[],
+): Promise<ClassificationAttempt> {
+  try {
+    return {
+      results: await classifier.classify(articles),
+      failures: [],
+    }
+  } catch (error) {
+    if (!(error instanceof SplittableClassifierError) || articles.length < 2) {
+      return {
+        results: [],
+        failures: articles.map(article => ({ article, error })),
+      }
+    }
+
+    const middle = Math.ceil(articles.length / 2)
+    const results: ClassificationResult[] = []
+    const failures: ClassificationAttempt["failures"] = []
+    for (const batch of [articles.slice(0, middle), articles.slice(middle)]) {
+      try {
+        results.push(...await classifier.classify(batch))
+      } catch (batchError) {
+        failures.push(...batch.map(article => ({ article, error: batchError })))
+      }
+    }
+    return { results, failures }
+  }
+}
+
 export async function processPendingClassifications(
   repository: NewsRepository,
   classifier: NewsClassifier,
   model: string,
+  fallbackIndustry: IndustryCode = "OTHER",
 ) {
   let processed = 0
   while (true) {
     const articles = await repository.getPendingClassifications(BATCH_SIZE)
     if (!articles.length) return processed
 
-    let results: ClassificationResult[]
-    try {
-      results = await classifier.classify(articles)
-    } catch (error) {
-      await Promise.all(articles.map(article =>
-        repository.recordClassificationFailure(article, safeErrorMessage(error)),
-      ))
-      continue
-    }
+    const attempt = await classifyWithSmallerRetry(classifier, articles)
+    await Promise.all(attempt.failures.map(({ article, error }) =>
+      repository.recordClassificationFailure(article, safeErrorMessage(error)),
+    ))
 
-    const resultsById = new Map(results.map(result => [result.articleId, result]))
+    const resultsById = new Map(attempt.results.map(result => [result.articleId, result]))
     for (const article of articles) {
-      const initial = resultsById.get(article.id)!
+      const initial = resultsById.get(article.id)
+      if (!initial) continue
       if (initial.confidence >= CONFIDENCE_THRESHOLD) {
         await repository.saveClassification(article, initial, { model })
         processed += 1
@@ -209,7 +291,7 @@ export async function processPendingClassifications(
         } else {
           await repository.saveClassification(
             article,
-            { industry: "OTHER", confidence: retried.confidence },
+            { industry: fallbackIndustry, confidence: retried.confidence },
             { model, lowConfidence: true },
           )
         }
@@ -235,8 +317,12 @@ export function requestClassificationProcessing() {
       const config = await getResolvedClassifierConfig()
       if (!config.enabled || !config.apiKey) continue
       const repository = await getNewsRepository()
-      const classifier = new QwenNewsClassifier(config)
-      processed += await processPendingClassifications(repository, classifier, config.model)
+      const definitions = await getResolvedIndustryDefinitions()
+      const classifier = new QwenNewsClassifier(config, fetch, definitions)
+      const fallbackIndustry = definitions.find(item => item.code === "OTHER")?.code
+        ?? definitions.at(-1)?.code
+        ?? "OTHER"
+      processed += await processPendingClassifications(repository, classifier, config.model, fallbackIndustry)
     }
     return processed
   })().catch((error) => {
@@ -256,5 +342,4 @@ export {
   DEFAULT_ENDPOINT,
   DEFAULT_MODEL,
   DEFAULT_TIMEOUT_MS,
-  classificationResponseSchema,
 }

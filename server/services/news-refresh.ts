@@ -1,8 +1,9 @@
 import type { SourceID, SourceResponse } from "@shared/types"
 import { sources } from "@shared/sources"
+import { industryDefinitions } from "@shared/industry"
 import { getters } from "#/getters"
 import { getCacheTable } from "#/database/cache"
-import { getNewsRepository } from "#/database/news"
+import { classificationVersion, getNewsRepository } from "#/database/news"
 import { getNewsSettingsRepository } from "#/database/settings"
 import type { CacheInfo } from "#/types"
 import { requestClassificationProcessing } from "#/services/news-classifier"
@@ -30,11 +31,19 @@ async function persistArticles(id: SourceID, items: SourceResponse["items"]) {
   try {
     const settings = await getNewsSettingsRepository()
     const classificationEnabled = await settings.isClassificationEnabled(id)
+    const industries = await settings.getIndustryDefinitions(industryDefinitions)
     const repository = await getNewsRepository()
-    const changed = await repository.ingest(id, items, Date.now(), classificationEnabled)
-    if (changed && classificationEnabled) void requestClassificationProcessing()
+    const changed = await repository.ingest(
+      id,
+      items,
+      Date.now(),
+      classificationEnabled,
+      classificationVersion(industries),
+    )
+    return { changed, classificationEnabled }
   } catch (error) {
     logger.error(`failed to persist articles for ${id}`, error)
+    return { changed: 0, classificationEnabled: false }
   }
 }
 
@@ -48,10 +57,12 @@ export function refreshSourceNow(id: SourceID) {
     await settings.markFetchStarted(id, now)
     try {
       const items = (await getters[id]()).slice(0, 30)
+      if (!items.length) throw new Error("Source returned no items")
       const cacheTable = await getCacheTable()
-      if (cacheTable && items.length) await cacheTable.set(id, items)
-      if (items.length) await persistArticles(id, items)
+      if (cacheTable) await cacheTable.set(id, items)
+      const persisted = await persistArticles(id, items)
       await settings.markFetchCompleted(id)
+      if (persisted.changed && persisted.classificationEnabled) void requestClassificationProcessing()
       logger.success(`fetch ${id} latest`)
       return {
         status: "success",

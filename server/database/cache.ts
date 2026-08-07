@@ -2,6 +2,7 @@ import process from "node:process"
 import type { NewsItem } from "@shared/types"
 import type { Database } from "db0"
 import type { CacheInfo, CacheRow } from "../types"
+import { getNewsSettingsRepository } from "#/database/settings"
 
 const CACHE_RETENTION_MS = 24 * 60 * 60 * 1000
 
@@ -84,7 +85,9 @@ export async function getCacheTable() {
   try {
     const db = useDatabase()
     // logger.info("db: ", db.getInstance())
-    if (process.env.ENABLE_CACHE === "false") return
+    const settings = await getNewsSettingsRepository()
+    const enabled = await settings.getCacheEnabled(process.env.ENABLE_CACHE !== "false")
+    if (!enabled) return
     const cacheTable = new Cache(db)
     if (process.env.INIT_TABLE !== "false") await cacheTable.init()
     return cacheTable

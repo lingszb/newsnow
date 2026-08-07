@@ -1,8 +1,10 @@
 import process from "node:process"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { IndustryNewsResponse } from "@shared/industry"
-import type { SourceResponse } from "@shared/types"
+import type { NewsSettingsResponse } from "@shared/settings"
+import type { SourceID, SourceResponse } from "@shared/types"
 import { createNewsNowMcpServer } from "./server"
+import { CACHE_RETENTION_MS } from "#/database/cache"
 
 const baseUrl = process.env.BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:4444"
 
@@ -13,6 +15,18 @@ async function getJson<T>(path: string) {
 }
 
 const server = createNewsNowMcpServer({
+  listIndustries: async () => {
+    const settings = await getJson<NewsSettingsResponse>("/api/settings")
+    return settings.industries
+  },
+  listAvailableSourceIds: async () => {
+    const settings = await getJson<NewsSettingsResponse>("/api/settings")
+    const now = Date.now()
+    return settings.sources
+      .filter(source => source.fetchStatus === "SUCCESS")
+      .filter(source => source.lastFetchCompletedAt && now - source.lastFetchCompletedAt <= CACHE_RETENTION_MS)
+      .map(source => source.id as SourceID)
+  },
   getSourceFeed: async (sourceId) => {
     const query = new URLSearchParams({ id: sourceId ?? "" })
     return await getJson<SourceResponse>(`/api/s?${query}`)

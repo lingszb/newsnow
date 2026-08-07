@@ -8,11 +8,15 @@ import { NewsSettingsRepository } from "./settings"
 describe("news repository", () => {
   let db: Database
   let repository: NewsRepository
+  let settings: NewsSettingsRepository
 
   beforeEach(async () => {
     db = createDatabase(sqlite({ name: ":memory:" }))
     repository = new NewsRepository(db)
     await repository.init()
+    settings = new NewsSettingsRepository(db)
+    await settings.init()
+    await settings.markFetchCompleted("zhihu")
   })
 
   afterEach(async () => {
@@ -113,8 +117,6 @@ describe("news repository", () => {
   })
 
   it("keeps disabled sources out of classification and industry queries", async () => {
-    const settings = new NewsSettingsRepository(db)
-    await settings.init()
     const item = {
       id: "disabled-source-article",
       title: "不参与行业分类的资讯",
@@ -137,6 +139,43 @@ describe("news repository", () => {
     })).items).toHaveLength(1)
 
     await settings.setClassificationEnabled("zhihu", false)
+    expect((await repository.queryIndustryNews({
+      industry: "TECH",
+      count: 10,
+      hours: 24,
+      sort: "hot",
+    })).items).toHaveLength(0)
+  })
+
+  it("requeues existing classifications after industry settings change", async () => {
+    await repository.ingest("zhihu", [{
+      id: "requeue-article",
+      title: "需要重新分类的资讯",
+      url: "https://example.com/requeue",
+    }], Date.now())
+    const [pending] = await repository.getPendingClassifications()
+    await repository.saveClassification(pending, { industry: "TECH", confidence: 0.9 }, { model: "test-model" })
+    expect(await repository.getPendingClassifications()).toHaveLength(0)
+
+    await expect(repository.requeueAllClassifications("industry-v2")).resolves.toBe(1)
+    await repository.saveClassification(pending, { industry: "TECH", confidence: 0.8 }, { model: "stale-model" })
+    await expect(repository.getPendingClassifications()).resolves.toEqual([
+      expect.objectContaining({ id: pending.id, classificationVersion: "industry-v2", retryCount: 0 }),
+    ])
+  })
+
+  it("keeps unavailable sources out of classification and industry queries", async () => {
+    const item = {
+      id: "unavailable-source-article",
+      title: "来源已经失效的资讯",
+      url: "https://example.com/unavailable",
+    }
+    expect(await repository.ingest("zhihu", [item], Date.now())).toBe(1)
+    const [pending] = await repository.getPendingClassifications()
+    await repository.saveClassification(pending, { industry: "TECH", confidence: 0.9 }, { model: "test-model" })
+
+    await settings.markFetchFailed("zhihu", "upstream failed")
+    expect(await repository.getPendingClassifications()).toHaveLength(0)
     expect((await repository.queryIndustryNews({
       industry: "TECH",
       count: 10,

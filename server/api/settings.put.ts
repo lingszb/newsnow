@@ -4,8 +4,18 @@ import { sources } from "@shared/sources"
 import { isConfigurableSourceId, updateNewsSettings } from "#/services/news-settings"
 
 const modelPattern = /^[\w./:-]+$/
+const industrySchema = z.object({
+  code: z.string().trim().min(2).max(32).regex(/^[A-Z][A-Z0-9_]*$/),
+  path: z.string().trim().min(1).max(50).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  name: z.string().trim().min(1).max(24),
+  description: z.string().trim().min(1).max(200),
+}).strict()
+
 const updateSchema = z.object({
+  cacheEnabled: z.boolean(),
+  classifierEnabled: z.boolean(),
   classifierModel: z.string().trim().min(1).max(120).regex(modelPattern),
+  industries: z.array(industrySchema).min(2).max(20),
   sources: z.array(z.object({
     id: z.string().refine(isConfigurableSourceId, "Unknown source id"),
     classificationEnabled: z.boolean(),
@@ -21,6 +31,26 @@ const updateSchema = z.object({
       })
     }
     ids.add(source.id)
+  }
+  const industryCodes = new Set<string>()
+  const industryPaths = new Set<string>()
+  for (const [index, industry] of value.industries.entries()) {
+    if (industryCodes.has(industry.code)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Duplicate industry code",
+        path: ["industries", index, "code"],
+      })
+    }
+    if (industryPaths.has(industry.path)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Duplicate industry path",
+        path: ["industries", index, "path"],
+      })
+    }
+    industryCodes.add(industry.code)
+    industryPaths.add(industry.path)
   }
 })
 

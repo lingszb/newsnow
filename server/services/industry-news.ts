@@ -1,9 +1,9 @@
 import { Buffer } from "node:buffer"
 import type { SourceID } from "@shared/types"
 import { sources } from "@shared/sources"
-import { industryCodes } from "@shared/industry"
-import type { IndustryCode, IndustryNewsResponse, IndustrySort } from "@shared/industry"
+import type { IndustryCode, IndustryDefinition, IndustryNewsResponse, IndustrySort } from "@shared/industry"
 import { getNewsRepository } from "#/database/news"
+import { getResolvedIndustryDefinitions } from "#/services/news-classifier"
 
 interface CursorPayload {
   offset: number
@@ -13,7 +13,7 @@ function decodeCursor(cursor?: string) {
   if (!cursor) return 0
   try {
     const payload = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as CursorPayload
-    if (!Number.isSafeInteger(payload.offset) || payload.offset < 0) throw new Error()
+    if (!Number.isSafeInteger(payload.offset) || payload.offset < 0) throw new Error("Invalid cursor offset")
     return payload.offset
   } catch {
     throw createError({ statusCode: 400, message: "Invalid cursor" })
@@ -24,9 +24,9 @@ function encodeCursor(offset: number) {
   return Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url")
 }
 
-export function parseIndustryCode(value: unknown, fallback?: IndustryCode) {
-  const code = String(value ?? fallback ?? "").toUpperCase() as IndustryCode
-  if (!industryCodes.includes(code))
+export function parseIndustryCode(value: unknown, definitions: IndustryDefinition[], fallback?: IndustryCode) {
+  const code = String(value ?? fallback ?? definitions[0]?.code ?? "").toUpperCase() as IndustryCode
+  if (!definitions.some(item => item.code === code))
     throw createError({ statusCode: 400, message: "Invalid industry" })
   return code
 }
@@ -69,7 +69,8 @@ export async function queryIndustryNews(input: {
   cursor?: string
   maximumCount?: number
 }): Promise<IndustryNewsResponse> {
-  const industry = parseIndustryCode(input.industry, "TECH")
+  const definitions = await getResolvedIndustryDefinitions()
+  const industry = parseIndustryCode(input.industry, definitions)
   const count = parseCount(input.count, 10, input.maximumCount ?? 50)
   const hours = parseHours(input.hours)
   const sort = parseSort(input.sort)
@@ -94,5 +95,6 @@ export async function queryIndustryCounts(input: { hours?: unknown, source?: unk
   const hours = parseHours(input.hours)
   const source = parseSource(input.source)
   const repository = await getNewsRepository()
-  return await repository.industryCounts(hours, source)
+  const definitions = await getResolvedIndustryDefinitions()
+  return await repository.industryCounts(hours, source, Date.now(), definitions)
 }

@@ -6,7 +6,7 @@
  * RESPONSIVE: 桌面强调横向元数据，移动端改为标题优先的纵向条目。
  */
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, Navigate } from "@tanstack/react-router"
 import { useTitle, useWindowSize } from "react-use"
 import type {
   IndustryCount,
@@ -14,7 +14,6 @@ import type {
   IndustrySort,
   IndustryStatusResponse,
 } from "@shared/industry"
-import { industryByCode, industryDefinitions } from "@shared/industry"
 import type { SourceID } from "@shared/types"
 import { NavBar } from "../navbar"
 
@@ -70,7 +69,7 @@ function IndustryTabs({
       </p>
       <div className="industry-tabs-scroll overflow-x-auto pb-1">
         <div className="flex min-w-max gap-2">
-          {industryDefinitions.map(industry => (
+          {counts?.map(industry => (
             <Link
               key={industry.code}
               to="/industry/$industry"
@@ -102,8 +101,8 @@ function IndustryTabs({
 function LoadingRows() {
   return (
     <div aria-label="正在加载行业资讯" className="divide-y divide-neutral-400/15 animate-pulse">
-      {Array.from({ length: 6 }).map((_, index) => (
-        <div key={index} className="py-5 flex gap-4">
+      {["one", "two", "three", "four", "five", "six"].map(key => (
+        <div key={key} className="py-5 flex gap-4">
           <span className="h-8 w-8 rounded-lg bg-neutral-400/15" />
           <span className="flex-1">
             <span className="block h-5 max-w-2xl rounded bg-neutral-400/15" />
@@ -205,7 +204,7 @@ function NewsRow({
               className="h-5 w-5 rounded-full bg-cover"
               style={{ backgroundImage: `url(/icons/${item.sourceId.split("-")[0]}.png)` }}
             />
-            <span>{item.sourceName}{item.sourceTitle ? ` · ${item.sourceTitle}` : ""}</span>
+            <span>{`${item.sourceName}${item.sourceTitle ? ` · ${item.sourceTitle}` : ""}`}</span>
           </span>
           <time dateTime={new Date(item.publishedAt).toISOString()}>
             {relative || new Date(item.publishedAt).toLocaleString("zh-CN")}
@@ -216,14 +215,11 @@ function NewsRow({
   )
 }
 
-export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) {
-  const definition = industryByCode(industry)
+export function IndustryPage({ industryPath }: { industryPath: string }) {
   const { width } = useWindowSize()
   const [sort, setSort] = useState<IndustrySort>("hot")
   const [hours, setHours] = useState(24)
   const [source, setSource] = useState<SourceID | "">("")
-  useTitle(`NewsNow | ${definition.name}`)
-
   const countsQuery = useQuery<IndustryCount[]>({
     queryKey: ["industries", hours, source],
     queryFn: () => myFetch("/industries", {
@@ -234,6 +230,9 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
     }),
     refetchInterval: 60_000,
   })
+  const definition = countsQuery.data?.find(item => item.path === industryPath)
+  const industry = definition?.code
+  useTitle(definition ? `NewsNow | ${definition.name}` : "NewsNow | 行业")
 
   const statusQuery = useQuery<IndustryStatusResponse>({
     queryKey: ["industry-status"],
@@ -242,10 +241,10 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
   })
 
   const newsQuery = useInfiniteQuery<IndustryNewsResponse>({
-    queryKey: ["industry-news", industry, hours, source, sort],
+    queryKey: ["industry-news", industry ?? industryPath, hours, source, sort],
     queryFn: ({ pageParam }) => myFetch("/industry-news", {
       query: {
-        industry,
+        industry: industry!,
         hours,
         sort,
         count: 20,
@@ -255,6 +254,7 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
     }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: page => page.nextCursor,
+    enabled: Boolean(industry),
   })
 
   const items = newsQuery.data?.pages.flatMap(page => page.items) ?? []
@@ -267,6 +267,16 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
     ])
   }
 
+  if (countsQuery.isSuccess && !definition && countsQuery.data[0]) {
+    return (
+      <Navigate
+        to="/industry/$industry"
+        params={{ industry: countsQuery.data[0].path }}
+        replace
+      />
+    )
+  }
+
   return (
     <section className="mx-auto max-w-6xl px-1 md:px-5">
       <div className="flex justify-center md:hidden mb-6">
@@ -277,7 +287,7 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold tracking-[-0.02em]">行业资讯</h1>
-            <p className="mt-2 text-sm op-60">{definition.description}</p>
+            <p className="mt-2 text-sm op-60">{definition?.description ?? "正在读取行业分类…"}</p>
           </div>
           <p className="text-xs op-55">
             {statusQuery.data?.running
@@ -291,7 +301,7 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
           </p>
         </div>
         <div className="mt-5">
-          <IndustryTabs counts={countsQuery.data} current={industry} />
+          <IndustryTabs counts={countsQuery.data} current={industry ?? ""} />
         </div>
       </header>
 
@@ -341,9 +351,9 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
       </div>
 
       <div className="rounded-2xl bg-neutral-400/5 px-4 md:px-6">
-        {newsQuery.isPending
+        {countsQuery.isPending || newsQuery.isPending
           ? <LoadingRows />
-          : newsQuery.isError
+          : countsQuery.isError || newsQuery.isError
             ? <ErrorState onRetry={retry} />
             : items.length
               ? (
@@ -374,9 +384,9 @@ export function IndustryPage({ industry }: { industry: IndustryCount["code"] }) 
       <div className="mt-5 flex flex-wrap justify-between gap-2 text-xs op-50">
         <span>仅显示已完成分类的资讯</span>
         <span>
-          待分类 {statusQuery.data?.pendingClassifications ?? "—"}
+          {`待分类 ${statusQuery.data?.pendingClassifications ?? "—"}`}
           {" · "}
-          分类失败 {statusQuery.data?.failedClassifications ?? "—"}
+          {`分类失败 ${statusQuery.data?.failedClassifications ?? "—"}`}
         </span>
       </div>
     </section>

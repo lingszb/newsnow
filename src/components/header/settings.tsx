@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createPortal } from "react-dom"
 import type { NewsSettingsResponse, NewsSettingsUpdate, SourceFetchStatus } from "@shared/settings"
+import type { IndustryDefinition } from "@shared/industry"
+
+interface EditableIndustry extends IndustryDefinition {
+  editorId: number
+}
 
 const statusMetadata: Record<SourceFetchStatus, { label: string, className: string }> = {
   NEVER: { label: "尚未抓取", className: "bg-neutral-400/10 op-60" },
@@ -52,8 +57,12 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   const { enableLogin, loggedIn, login } = useLogin()
   const dialog = useRef<HTMLElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
+  const nextIndustryId = useRef(0)
   const [search, setSearch] = useState("")
+  const [classifierEnabled, setClassifierEnabled] = useState(false)
+  const [cacheEnabled, setCacheEnabled] = useState(true)
   const [model, setModel] = useState("")
+  const [industries, setIndustries] = useState<EditableIndustry[]>([])
   const [sourceSettings, setSourceSettings] = useState<Record<string, boolean>>({})
   const [saveError, setSaveError] = useState("")
   const settingsQuery = useQuery<NewsSettingsResponse>({
@@ -63,7 +72,13 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (!settingsQuery.data) return
+    setClassifierEnabled(settingsQuery.data.classifier.enabled)
+    setCacheEnabled(settingsQuery.data.features.cacheEnabled)
     setModel(settingsQuery.data.classifier.model)
+    setIndustries(settingsQuery.data.industries.map(industry => ({
+      ...industry,
+      editorId: nextIndustryId.current++,
+    })))
     setSourceSettings(Object.fromEntries(
       settingsQuery.data.sources.map(source => [source.id, source.classificationEnabled]),
     ))
@@ -75,7 +90,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
       if (event.key === "Escape") onClose()
       if (event.key !== "Tab" || !dialog.current) return
       const focusable = [...dialog.current.querySelectorAll<HTMLElement>(
-        "button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex='-1'])",
+        "button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex='-1'])",
       )]
       if (!focusable.length) return
       const first = focusable[0]
@@ -117,11 +132,46 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     if (!normalizedSearch) return true
     return [source.id, source.name, source.title].some(value => value?.toLocaleLowerCase().includes(normalizedSearch))
   }) ?? []
+  const normalizedIndustries = industries.map(industry => ({
+    code: industry.code.trim().toUpperCase(),
+    path: industry.path.trim().toLowerCase(),
+    name: industry.name.trim(),
+    description: industry.description.trim(),
+  }))
+  const industryCodes = normalizedIndustries.map(industry => industry.code)
+  const industryPaths = normalizedIndustries.map(industry => industry.path)
+  const industriesValid = normalizedIndustries.length >= 2
+    && normalizedIndustries.every(industry => (
+      /^[A-Z][A-Z0-9_]{1,31}$/.test(industry.code)
+      && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(industry.path)
+      && Boolean(industry.name)
+      && Boolean(industry.description)
+    ))
+    && new Set(industryCodes).size === industryCodes.length
+    && new Set(industryPaths).size === industryPaths.length
+
+  const updateIndustry = (index: number, field: keyof IndustryDefinition, value: string) => {
+    setIndustries(current => current.map((industry, itemIndex) => (
+      itemIndex === index ? { ...industry, [field]: value } : industry
+    )))
+  }
+  const moveIndustry = (index: number, direction: -1 | 1) => {
+    setIndustries((current) => {
+      const target = index + direction
+      if (target < 0 || target >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
   const submit = () => {
-    if (!settingsQuery.data || !model.trim()) return
+    if (!settingsQuery.data || !model.trim() || !industriesValid) return
     setSaveError("")
     mutation.mutate({
+      cacheEnabled,
+      classifierEnabled,
       classifierModel: model.trim(),
+      industries: normalizedIndustries,
       sources: settingsQuery.data.sources.map(source => ({
         id: source.id,
         classificationEnabled: sourceSettings[source.id] ?? true,
@@ -144,7 +194,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
         <header className="flex items-start justify-between gap-4 border-b border-neutral-400/15 px-5 py-4 md:px-6">
           <div>
             <h2 id="settings-title" className="text-xl font-bold">设置</h2>
-            <p className="mt-1 text-sm op-60">管理行业分类模型并查看各数据源的抓取状态。</p>
+            <p className="mt-1 text-sm op-60">管理运行时功能、行业分类和各数据源状态。</p>
           </div>
           <button
             ref={closeButton}
@@ -174,18 +224,38 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
               )
             : (
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-6">
-                  <section aria-labelledby="classifier-settings-title">
+                  <section aria-labelledby="feature-settings-title">
+                    <h3 id="feature-settings-title" className="font-bold">功能开关</h3>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-neutral-400/15 px-4 py-3">
+                        <div>
+                          <p className="text-sm font-bold">行业分类服务</p>
+                          <p className="mt-1 text-xs op-60">控制分类队列是否调用模型；关闭后保留现有分类结果。</p>
+                        </div>
+                        <Switch checked={classifierEnabled} label="启用行业分类服务" onChange={setClassifierEnabled} />
+                      </div>
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-neutral-400/15 px-4 py-3">
+                        <div>
+                          <p className="text-sm font-bold">数据缓存</p>
+                          <p className="mt-1 text-xs op-60">控制 SQLite 热点缓存；关闭后数据源请求会直接刷新。</p>
+                        </div>
+                        <Switch checked={cacheEnabled} label="启用数据缓存" onChange={setCacheEnabled} />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="mt-7" aria-labelledby="classifier-settings-title">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 id="classifier-settings-title" className="font-bold">分类模型</h3>
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className={$(
                           "rounded-full px-2 py-1",
-                          settingsQuery.data?.classifier.enabled
+                          classifierEnabled
                             ? "bg-green-500/10 color-green-700 dark:color-green-300"
                             : "bg-amber-500/10 color-amber-700 dark:color-amber-300",
                         )}
                         >
-                          {settingsQuery.data?.classifier.enabled ? "分类服务已启用" : "分类服务未启用"}
+                          {classifierEnabled ? "分类服务将启用" : "分类服务将关闭"}
                         </span>
                         <span className="rounded-full bg-neutral-400/10 px-2 py-1 op-70">
                           {settingsQuery.data?.classifier.configured ? "API Key 已配置" : "API Key 未配置"}
@@ -203,17 +273,112 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                         onChange={event => setModel(event.target.value)}
                       />
                     </label>
-                    {!settingsQuery.data?.classifier.enabled && (
+                    {classifierEnabled && !settingsQuery.data?.classifier.configured && (
                       <p className="mt-2 text-xs color-amber-700 dark:color-amber-300">
-                        当前环境变量 NEWS_CLASSIFIER_ENABLED 未开启；模型设置会保存，但队列暂时不会消费。
+                        NEWS_CLASSIFIER_API_KEY 尚未配置；开关会保存，但分类队列暂时无法调用模型。
                       </p>
                     )}
+                    <p className="mt-2 text-xs op-55">
+                      API Key、请求端点和分类版本仍由环境变量管理，避免在页面和设置接口中暴露敏感或部署级配置。
+                    </p>
                     {enableLogin && !loggedIn && (
                       <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-neutral-400/10 px-3 py-2 text-xs">
                         <span className="op-65">当前服务要求登录后才能保存设置。</span>
                         <button type="button" className="shrink-0 color-primary font-bold cursor-pointer" onClick={login}>前往登录</button>
                       </div>
                     )}
+                  </section>
+
+                  <section className="mt-7" aria-labelledby="industry-settings-title">
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                      <div>
+                        <h3 id="industry-settings-title" className="font-bold">行业分类</h3>
+                        <p className="mt-1 text-xs op-60">可编辑名称、模型代码、页面路径和分类说明；顺序同时决定页面标签顺序。</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={industries.length >= 20}
+                        className="h-9 rounded-lg bg-neutral-400/10 px-3 text-sm cursor-pointer disabled:op-45 disabled:cursor-not-allowed"
+                        onClick={() => setIndustries(current => [...current, {
+                          code: "",
+                          path: "",
+                          name: "",
+                          description: "",
+                          editorId: nextIndustryId.current++,
+                        }])}
+                      >
+                        添加行业
+                      </button>
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {industries.map((industry, index) => (
+                        <fieldset key={industry.editorId} className="rounded-xl border border-neutral-400/15 p-3 md:p-4">
+                          <legend className="sr-only">{`第 ${index + 1} 个行业分类`}</legend>
+                          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                            <label>
+                              <span className="text-xs op-60">显示名称</span>
+                              <input
+                                value={industry.name}
+                                maxLength={24}
+                                className="mt-1 h-9 w-full rounded-lg bg-neutral-400/10 px-3 text-sm outline-none select-text focus-visible:ring-2 focus-visible:ring-primary/60"
+                                placeholder="例如 科技"
+                                onChange={event => updateIndustry(index, "name", event.target.value)}
+                              />
+                            </label>
+                            <label>
+                              <span className="text-xs op-60">模型代码</span>
+                              <input
+                                value={industry.code}
+                                maxLength={32}
+                                spellCheck={false}
+                                className="mt-1 h-9 w-full rounded-lg bg-neutral-400/10 px-3 text-sm uppercase outline-none select-text focus-visible:ring-2 focus-visible:ring-primary/60"
+                                placeholder="例如 TECH"
+                                onChange={event => updateIndustry(index, "code", event.target.value.toUpperCase())}
+                              />
+                            </label>
+                            <label>
+                              <span className="text-xs op-60">页面路径</span>
+                              <input
+                                value={industry.path}
+                                maxLength={50}
+                                spellCheck={false}
+                                className="mt-1 h-9 w-full rounded-lg bg-neutral-400/10 px-3 text-sm lowercase outline-none select-text focus-visible:ring-2 focus-visible:ring-primary/60"
+                                placeholder="例如 tech"
+                                onChange={event => updateIndustry(index, "path", event.target.value.toLowerCase())}
+                              />
+                            </label>
+                            <div className="flex gap-1">
+                              <button type="button" aria-label={`上移${industry.name || `第 ${index + 1} 项`}`} disabled={index === 0} className="btn disabled:op-30" onClick={() => moveIndustry(index, -1)}>
+                                <span className="i-ph:arrow-up-duotone" />
+                              </button>
+                              <button type="button" aria-label={`下移${industry.name || `第 ${index + 1} 项`}`} disabled={index === industries.length - 1} className="btn disabled:op-30" onClick={() => moveIndustry(index, 1)}>
+                                <span className="i-ph:arrow-down-duotone" />
+                              </button>
+                              <button type="button" aria-label={`删除${industry.name || `第 ${index + 1} 项`}`} disabled={industries.length <= 2} className="btn color-primary disabled:op-30" onClick={() => setIndustries(current => current.filter((_, itemIndex) => itemIndex !== index))}>
+                                <span className="i-ph:trash-duotone" />
+                              </button>
+                            </div>
+                          </div>
+                          <label className="mt-3 block">
+                            <span className="text-xs op-60">分类说明</span>
+                            <textarea
+                              value={industry.description}
+                              maxLength={200}
+                              rows={2}
+                              className="mt-1 w-full resize-y rounded-lg bg-neutral-400/10 px-3 py-2 text-sm outline-none select-text focus-visible:ring-2 focus-visible:ring-primary/60"
+                              placeholder="描述该行业应包含的资讯范围"
+                              onChange={event => updateIndustry(index, "description", event.target.value)}
+                            />
+                          </label>
+                        </fieldset>
+                      ))}
+                    </div>
+                    {!industriesValid && (
+                      <p role="alert" className="mt-2 text-xs color-primary">
+                        至少保留 2 个行业；代码需为大写字母、数字或下划线，路径需为小写英文、数字或连字符，且代码和路径不能重复。
+                      </p>
+                    )}
+                    <p className="mt-2 text-xs op-55">修改行业后，现有可用数据源中的资讯会重新进入分类队列。</p>
                   </section>
 
                   <section className="mt-7" aria-labelledby="source-settings-title">
@@ -298,7 +463,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
               <button type="button" className="h-9 rounded-lg px-4 cursor-pointer hover:bg-neutral-400/10" onClick={onClose}>取消</button>
               <button
                 type="button"
-                disabled={mutation.isPending || !model.trim()}
+                disabled={mutation.isPending || !model.trim() || !industriesValid}
                 className="h-9 rounded-lg bg-primary px-4 color-white cursor-pointer disabled:op-45 disabled:cursor-not-allowed"
                 onClick={submit}
               >

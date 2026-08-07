@@ -13,26 +13,16 @@ POST http://<NewsNow 主机>:4444/mcp
 Authorization: Bearer <MCP_INTERNAL_TOKEN>
 ```
 
-MCP 与网站 API 共用新闻抓取、缓存和行业查询服务，提供三个只读工具：
+MCP 与网站 API 共用新闻抓取、缓存和行业查询服务，提供四个只读工具：
 
 | 工具 | 参数 | 用途 |
 |---|---|---|
 | `list_news_sources` | 无 | 列出可用来源 ID、平台、榜单和栏目 |
 | `get_hottest_latest_news` | `id`，`count=10` | 获取指定来源的热点资讯，`count` 范围为 1–20 |
+| `list_industries` | 无 | 列出当前动态行业的代码、路径、名称和描述 |
 | `get_industry_news` | `industry`，`count=10`，`hours=24`，`sort=hot` | 获取已分类的跨平台行业资讯 |
 
-`get_industry_news.industry` 只接受：
-
-```text
-TECH
-FINANCE
-CONSUMER
-HEALTH
-ENTERTAINMENT_SPORTS
-OTHER
-```
-
-`hours` 范围为 1–168，`sort` 只接受 `hot` 或 `latest`。
+`get_industry_news.industry` 只接受当前 `list_industries` 返回的 `code`。行业可在设置页动态修改，MCP 每次调用都会读取最新配置。`hours` 范围为 1–168，`sort` 只接受 `hot` 或 `latest`。
 
 当前 HTTP MCP 有以下边界：
 
@@ -54,9 +44,12 @@ OTHER
 | `NEWS_CLASSIFIER_API_KEY` | 分类开启时需要 | 无 | 百炼 API Key |
 | `NEWS_CLASSIFIER_ENDPOINT` | 否 | 百炼 OpenAI 兼容端点 | 分类请求地址 |
 | `NEWS_CLASSIFIER_MODEL` | 否 | `qwen3.6-flash-2026-04-16` | 分类模型 |
+| `NEWS_CLASSIFIER_TIMEOUT_MS` | 否 | `30000` | 单次分类请求超时，允许 1000 至 120000 毫秒 |
 | `NEWS_CLASSIFICATION_VERSION` | 否 | `industry-v1` | 分类版本 |
 | `INIT_TABLE` | 首次启动需要 | 无 | 设置为 `true` 以创建数据库表 |
 | `ENABLE_CACHE` | 建议 | 无 | 设置为 `true` 以启用 SQLite 缓存 |
+
+行业分类属于结构化提取任务，所有分类请求都会关闭模型思考。百炼中的 Qwen、DeepSeek、Kimi、GLM 等混合思考模型使用 `enable_thinking: false`；MiniMax/MiniMax-M3 使用 `thinking.type: disabled`。思考模式无法关闭的模型不适合作为分类模型。
 
 注意：
 
@@ -112,6 +105,7 @@ NEWS_CLASSIFIER_ENABLED=true
 NEWS_CLASSIFIER_API_KEY=请替换为百炼APIKey
 NEWS_CLASSIFIER_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
 NEWS_CLASSIFIER_MODEL=qwen3.6-flash-2026-04-16
+NEWS_CLASSIFIER_TIMEOUT_MS=30000
 NEWS_CLASSIFICATION_VERSION=industry-v1
 ```
 
@@ -256,6 +250,7 @@ npx.cmd -y @modelcontextprotocol/inspector@latest `
 ```text
 list_news_sources
 get_hottest_latest_news
+list_industries
 get_industry_news
 ```
 
@@ -292,7 +287,22 @@ npx.cmd -y @modelcontextprotocol/inspector@latest `
 
 该工具可能触发指定来源刷新，因此测试时需要允许 NewsNow 访问外部新闻来源。
 
-### 5.4 获取行业资讯
+### 5.4 列出动态行业
+
+```powershell
+npx.cmd -y @modelcontextprotocol/inspector@latest `
+  --cli $McpUrl `
+  --transport http `
+  --method tools/call `
+  --tool-name list_industries `
+  --header "Authorization: Bearer $env:MCP_INTERNAL_TOKEN"
+```
+
+返回的 `structuredContent.industries` 包含 `code`、`path`、`name` 和 `description`。设置页修改行业后再次调用即可得到最新结果，无需重连 MCP。
+
+### 5.5 获取行业资讯
+
+先从 `list_industries` 的结果中选择当前有效的行业 `code`：
 
 ```powershell
 npx.cmd -y @modelcontextprotocol/inspector@latest `
@@ -435,6 +445,7 @@ NEWS_CLASSIFIER_ENABLED=true
 NEWS_CLASSIFIER_API_KEY=请替换
 NEWS_CLASSIFIER_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
 NEWS_CLASSIFIER_MODEL=qwen3.6-flash-2026-04-16
+NEWS_CLASSIFIER_TIMEOUT_MS=30000
 NEWS_CLASSIFICATION_VERSION=industry-v1
 
 MCP_INTERNAL_TOKEN=请替换为至少32字节随机令牌
@@ -520,8 +531,8 @@ npx -y @modelcontextprotocol/inspector@latest \
 
 上线验收至少包括：
 
-1. `tools/list` 只出现预期的三个工具。
-2. 三个工具均能返回 `structuredContent`。
+1. `tools/list` 只出现预期的四个工具。
+2. 四个工具均能返回 `structuredContent`。
 3. 缺少或错误 Token 返回 401。
 4. 未允许的 Host/Origin 返回 403。
 5. 公网来源无法绕过 VPN、防火墙或代理 ACL 访问。

@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { afterEach, describe, expect, it } from "vitest"
-import type { SourceResponse } from "@shared/types"
+import type { SourceID, SourceResponse } from "@shared/types"
+import type { IndustryCode, IndustryDefinition } from "@shared/industry"
 import { createNewsNowMcpServer, resolveMcpSourceId } from "./server"
 
 describe("newsNow MCP tools", () => {
@@ -13,8 +14,19 @@ describe("newsNow MCP tools", () => {
     await Promise.all(openServers.splice(0).map(server => server.close()))
   })
 
-  async function connect(sourceResponse?: SourceResponse) {
+  async function connect(
+    sourceResponse?: SourceResponse,
+    availableSourceIds: SourceID[] = [sourceResponse?.id ?? "zhihu"],
+    industries: IndustryDefinition[] = [{
+      code: "TECH",
+      path: "tech",
+      name: "科技",
+      description: "AI、互联网、软件、硬件、通信、科学技术",
+    }],
+  ) {
     const server = createNewsNowMcpServer({
+      listIndustries: async () => industries,
+      listAvailableSourceIds: async () => availableSourceIds,
       getSourceFeed: async () => sourceResponse ?? ({
         status: "success",
         id: "zhihu",
@@ -26,7 +38,7 @@ describe("newsNow MCP tools", () => {
           extra: { hover: "热点摘要" },
         }],
       }),
-      queryIndustryNews: async () => ({
+      queryIndustryNews: async input => ({
         items: [{
           id: "industry-article",
           sourceId: "zhihu",
@@ -35,7 +47,7 @@ describe("newsNow MCP tools", () => {
           url: "https://example.com/industry",
           publishedAt: Date.now(),
           rank: 1,
-          industry: "TECH",
+          industry: String(input.industry) as IndustryCode,
           confidence: 0.9,
         }],
       }),
@@ -49,12 +61,13 @@ describe("newsNow MCP tools", () => {
     return client
   }
 
-  it("lists and calls all three tools with structured output", async () => {
+  it("lists and calls all four tools with structured output", async () => {
     const client = await connect()
     const tools = await client.listTools()
     expect(tools.tools.map(tool => tool.name)).toEqual([
       "list_news_sources",
       "get_hottest_latest_news",
+      "list_industries",
       "get_industry_news",
     ])
 
@@ -66,6 +79,16 @@ describe("newsNow MCP tools", () => {
       sources: expect.arrayContaining([
         expect.objectContaining({ id: "zhihu", platformName: "知乎" }),
       ]),
+    })
+
+    const industries = await client.callTool({
+      name: "list_industries",
+      arguments: {},
+    })
+    expect(industries.structuredContent).toMatchObject({
+      industries: [
+        { code: "TECH", path: "tech", name: "科技", description: "AI、互联网、软件、硬件、通信、科学技术" },
+      ],
     })
 
     const hottest = await client.callTool({
@@ -92,6 +115,83 @@ describe("newsNow MCP tools", () => {
     const result = await client.callTool({
       name: "get_industry_news",
       arguments: { industry: "INVALID" },
+    })
+    expect(result.isError).toBe(true)
+  })
+
+  it("reads changed industry definitions on every list and query call", async () => {
+    const industries: IndustryDefinition[] = [{
+      code: "TECH",
+      path: "tech",
+      name: "科技",
+      description: "科技内容",
+    }]
+    const client = await connect(undefined, ["zhihu"], industries)
+
+    const initial = await client.callTool({ name: "list_industries", arguments: {} })
+    expect(initial.structuredContent).toEqual({
+      industries: [{ code: "TECH", path: "tech", name: "科技", description: "科技内容" }],
+    })
+
+    industries.splice(0, industries.length, {
+      code: "GAME",
+      path: "game",
+      name: "游戏",
+      description: "游戏行业内容",
+    })
+
+    const changed = await client.callTool({ name: "list_industries", arguments: {} })
+    expect(changed.structuredContent).toEqual({
+      industries: [{ code: "GAME", path: "game", name: "游戏", description: "游戏行业内容" }],
+    })
+
+    const game = await client.callTool({
+      name: "get_industry_news",
+      arguments: { industry: "GAME" },
+    })
+    expect(game.isError).not.toBe(true)
+    expect(game.structuredContent).toMatchObject({ industry: "GAME" })
+
+    const removed = await client.callTool({
+      name: "get_industry_news",
+      arguments: { industry: "TECH" },
+    })
+    expect(removed.isError).toBe(true)
+  })
+
+  it("hides unavailable sources and rejects direct access to them", async () => {
+    const client = await connect(undefined, ["zhihu"])
+    const sources = await client.callTool({
+      name: "list_news_sources",
+      arguments: {},
+    })
+    expect(sources.structuredContent).toMatchObject({
+      sources: expect.not.arrayContaining([
+        expect.objectContaining({ id: "kaopu" }),
+      ]),
+    })
+
+    const result = await client.callTool({
+      name: "get_hottest_latest_news",
+      arguments: { id: "kaopu" },
+    })
+    expect(result.isError).toBe(true)
+  })
+
+  it("does not expose stale cache results through MCP", async () => {
+    const client = await connect({
+      status: "cache",
+      id: "zhihu",
+      updatedTime: Date.now(),
+      items: [{
+        id: "stale-article",
+        title: "过期缓存资讯",
+        url: "https://example.com/stale",
+      }],
+    })
+    const result = await client.callTool({
+      name: "get_hottest_latest_news",
+      arguments: { id: "zhihu" },
     })
     expect(result.isError).toBe(true)
   })
