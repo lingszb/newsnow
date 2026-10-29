@@ -43,6 +43,9 @@ dotenv.config({
   path: join(projectDir, ".env.server"),
 })
 
+// Vercel hosts the statically built UI; the original Nitro service keeps persistent jobs and SQLite.
+const frontendOnly = process.env.NEWSNOW_FRONTEND_ONLY === "true"
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -71,6 +74,6 @@ export default defineConfig({
     unocss(),
     react(),
     pwa(),
-    nitro(),
+    ...(!frontendOnly ? [nitro()] : []),
   ],
 })
