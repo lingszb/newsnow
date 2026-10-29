@@ -20,8 +20,8 @@ function SourceLinks({ message }: { message: ChatMessage }) {
   const matches = [...message.content.matchAll(/\[(\d+)\]/g)]
   const mentioned = new Set(matches.map(match => Number(match[1])))
   const filtered = message.sources?.filter(source => mentioned.has(source.index)) ?? []
-  const referenced = filtered.length ? filtered : message.sources?.slice(0, 4) ?? []
-  if (!referenced.length) return null
+  const referenced = filtered
+  if (!referenced.length) return <p className="mt-2 text-xs op-55">本次回答没有可核验的新闻引用。</p>
   return (
     <div className="mt-3 pt-3 border-t border-neutral-400/20 text-xs">
       <p className="mb-2 op-55">参考新闻</p>
@@ -51,6 +51,8 @@ export function AgentSidebar() {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [targetArticleId, setTargetArticleId] = useState<string | undefined>()
+  const { loggedIn, enableLogin, login } = useLogin()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const bottom = useRef<HTMLDivElement>(null)
@@ -58,6 +60,8 @@ export function AgentSidebar() {
   useEffect(() => {
     const handler = (event: Event) => {
       if (!(event instanceof CustomEvent) || typeof event.detail?.title !== "string") return
+      setTargetArticleId(typeof event.detail.id === "string" ? event.detail.id : undefined)
+      setMessages([])
       setDraft(`请解读这条新闻，并说明相关背景与影响：${event.detail.title.slice(0, 200)}`)
       setOpen(true)
     }
@@ -81,6 +85,10 @@ export function AgentSidebar() {
   async function send(value = draft) {
     const question = value.trim()
     if (!question || loading) return
+    if (!loggedIn) {
+      setError(enableLogin ? "请先使用 GitHub 登录，再使用资讯助手。" : "管理员尚未启用 GitHub 登录，Agent 暂不可用。")
+      return
+    }
     const next: ChatMessage[] = [...messages, { role: "user", content: question }]
     setMessages(next)
     setDraft("")
@@ -90,10 +98,14 @@ export function AgentSidebar() {
       const response = await myFetch<ChatResponse>("/agent/chat", {
         method: "POST",
         timeout: 30000,
+        headers: {
+          Authorization: `Bearer ${safeParseString(localStorage.getItem("jwt")) || ""}`,
+        },
         body: {
           // Send at most six turns; the backend also validates the message history.
           messages: next.slice(-11).map(({ role, content }) => ({ role, content })),
           ...(industryPath ? { industryPath } : {}),
+          ...(targetArticleId ? { articleId: targetArticleId } : {}),
         },
       })
       setMessages(current => [...current, {
@@ -150,7 +162,7 @@ export function AgentSidebar() {
                   type="button"
                   title="清空对话"
                   className="p-2 rounded-lg hover:bg-neutral-400/10 cursor-pointer"
-                  onClick={() => { setMessages([]); setError("") }}
+                  onClick={() => { setMessages([]); setError(""); setTargetArticleId(undefined) }}
                 >
                   <span className="i-ph:arrow-counter-clockwise-duotone" aria-hidden="true" />
                 </button>
@@ -190,6 +202,9 @@ export function AgentSidebar() {
                 </div>
               )}
               <div className="flex flex-col gap-4">
+                {!loggedIn && enableLogin && (
+                  <button type="button" onClick={login} className="mb-4 rounded-xl bg-primary color-white px-4 py-3 text-sm cursor-pointer">GitHub 登录后开启 AI 问答</button>
+                )}
                 {messages.map((message, index) => (
                   <div
                     key={index}
