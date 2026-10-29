@@ -3,6 +3,7 @@ import { industryDefinitions } from "@shared/industry"
 import type { IndustryDefinition } from "@shared/industry"
 import type { PendingArticle } from "#/database/news"
 import type { ClassifierConfig, ClassifierFetch, ClassificationResult, NewsClassifier } from "./news-classifier"
+import { SplittableClassifierError } from "./classifier-errors"
 
 const MAX_BATCH_SIZE = 20
 
@@ -67,17 +68,21 @@ export class JevNewsClassifier implements NewsClassifier {
           questions,
         }),
       })
-      if (!response.ok)
-        throw new Error(`Jev request failed with HTTP ${response.status}`)
+      if (!response.ok) {
+        const message = `Jev request failed with HTTP ${response.status}`
+        if (response.status === 429 || response.status >= 500)
+          throw new SplittableClassifierError(message)
+        throw new Error(message)
+      }
 
       const parsed = jevResponseSchema.safeParse(await response.json())
       if (!parsed.success)
-        throw new Error("Jev response failed local schema validation")
+        throw new SplittableClassifierError("Jev response failed local schema validation")
 
       return articles.map((article, index) => {
         const answer = parsed.data.answers[`article_${index}`]
         if (!answer || !allowedCodes.has(answer.choice))
-          throw new Error(`Jev response missing or invalid article_${index} choice`)
+          throw new SplittableClassifierError(`Jev response missing or invalid article_${index} choice`)
         return {
           articleId: article.id,
           industry: answer.choice,
@@ -86,7 +91,7 @@ export class JevNewsClassifier implements NewsClassifier {
       })
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError")
-        throw new Error("Jev request timed out")
+        throw new SplittableClassifierError("Jev request timed out")
       throw error
     } finally {
       clearTimeout(timer)
