@@ -246,7 +246,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
 
                   <section className="mt-7" aria-labelledby="classifier-settings-title">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 id="classifier-settings-title" className="font-bold">分类模型</h3>
+                      <h3 id="classifier-settings-title" className="font-bold">分类模型 · {settingsQuery.data?.classifier.provider === "jev" ? "JEV Decisions" : "Qwen / Chat Completions"}</h3>
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className={$(
                           "rounded-full px-2 py-1",
@@ -266,6 +266,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                       <span className="text-sm op-65">模型名称</span>
                       <input
                         value={model}
+                        disabled={settingsQuery.data?.classifier.provider === "jev"}
                         maxLength={120}
                         spellCheck={false}
                         className="mt-2 h-10 w-full rounded-xl bg-neutral-400/10 px-3 outline-none select-text focus-visible:ring-2 focus-visible:ring-primary/60"
@@ -275,11 +276,11 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                     </label>
                     {classifierEnabled && !settingsQuery.data?.classifier.configured && (
                       <p className="mt-2 text-xs color-amber-700 dark:color-amber-300">
-                        NEWS_CLASSIFIER_API_KEY 尚未配置；开关会保存，但分类队列暂时无法调用模型。
+                        {settingsQuery.data?.classifier.provider === "jev" ? "NEWS_JEV_API_KEY / OPENROUTER_API_KEY" : "NEWS_CLASSIFIER_API_KEY"} 尚未配置；开关会保存，但分类队列暂时无法调用模型。
                       </p>
                     )}
                     <p className="mt-2 text-xs op-55">
-                      API Key、请求端点和分类版本仍由环境变量管理，避免在页面和设置接口中暴露敏感或部署级配置。
+                      {settingsQuery.data?.classifier.provider === "jev" ? "JEV 模型通过 NEWS_JEV_MODEL 环境变量设置；需切换 NEWS_CLASSIFIER_PROVIDER 才能切换分类器。" : "API Key、请求端点和分类版本仍由环境变量管理，避免在页面和设置接口中"}暴露敏感或部署级配置。
                     </p>
                     {enableLogin && !loggedIn && (
                       <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-neutral-400/10 px-3 py-2 text-xs">
