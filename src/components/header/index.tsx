@@ -4,6 +4,7 @@ import { useIsFetching, useQueryClient } from "@tanstack/react-query"
 import type { SourceID } from "@shared/types"
 import { NavBar } from "../navbar"
 import { Settings } from "./settings"
+import { AgentSidebar } from "~/components/agent/sidebar"
 import { currentSourcesAtom, goToTopAtom } from "~/atoms"
 
 function GoTop() {
@@ -79,6 +80,7 @@ export function Header() {
       <span className="justify-self-end flex gap-2 items-center text-xl text-primary-600 dark:text-primary">
         <GoTop />
         <Refresh />
+        <AgentSidebar />
         <Settings />
       </span>
     </>
