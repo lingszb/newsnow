@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
-const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8")) as {
+const config = JSON.parse(readFileSync("vercel.json", "utf8")) as {
   rewrites: Array<{ source: string, destination: string }>
 }
 
