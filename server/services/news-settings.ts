@@ -31,6 +31,7 @@ export async function getNewsSettings(): Promise<NewsSettingsResponse> {
       enabled: classifier.enabled,
       configured: Boolean(classifier.apiKey),
       model: classifier.model,
+      provider: classifier.provider ?? "qwen",
       version: classificationVersion(industries),
     },
     industries,
@@ -91,7 +92,8 @@ export async function updateNewsSettings(update: NewsSettingsUpdate) {
 
   await settings.setCacheEnabled(update.cacheEnabled)
   await settings.setClassifierEnabled(update.classifierEnabled)
-  await settings.setClassifierModel(update.classifierModel)
+  if ((await getResolvedClassifierConfig()).provider !== "jev")
+    await settings.setClassifierModel(update.classifierModel)
   await settings.setIndustryDefinitions(update.industries)
   const version = classificationVersion(update.industries)
   let shouldProcessClassifications = false
