@@ -25,6 +25,6 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
       - name: Tests
-        run: pnpm test -- --run
+        run: pnpm exec vitest run -c vitest.config.ts
       - name: Static Vercel build
         run: pnpm run build:vercel
