@@ -413,7 +413,8 @@ export class NewsRepository {
       SET industry_code = NULL, confidence = NULL
       WHERE industry_code = ? AND status = 'CLASSIFIED'
     `).run(code)
-    return Number(result.changes ?? result.meta?.changes ?? 0)
+    const driverResult = result as { changes?: number, meta?: { changes?: number } }
+    return Number(driverResult.changes ?? driverResult.meta?.changes ?? 0)
   }
 
   async industryCounts(
