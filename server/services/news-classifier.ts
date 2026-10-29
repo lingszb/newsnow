@@ -6,6 +6,7 @@ import type { NewsRepository, PendingArticle } from "#/database/news"
 import { getNewsRepository } from "#/database/news"
 import { getNewsSettingsRepository } from "#/database/settings"
 import { JevNewsClassifier } from "./jev-news-classifier"
+import { ClassifierArticleIdError, ClassifierTimeoutError, SplittableClassifierError } from "./classifier-errors"
 
 const BATCH_SIZE = 20
 const CONFIDENCE_THRESHOLD = 0.60
@@ -16,12 +17,6 @@ const DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat
 const DEFAULT_MODEL = "qwen3.6-flash-2026-04-16"
 const JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 const JEV_MODEL = "typesafe/jev-1.14"
-
-class SplittableClassifierError extends Error {}
-
-class ClassifierArticleIdError extends SplittableClassifierError {}
-
-class ClassifierTimeoutError extends SplittableClassifierError {}
 
 interface ChatCompletionResponse {
   choices?: Array<{
@@ -247,23 +242,17 @@ async function classifyWithSmallerRetry(
     }
   } catch (error) {
     if (!(error instanceof SplittableClassifierError) || articles.length < 2) {
-      return {
-        results: [],
-        failures: articles.map(article => ({ article, error })),
-      }
+      return { results: [], failures: articles.map(article => ({ article, error })) }
     }
 
     const middle = Math.ceil(articles.length / 2)
-    const results: ClassificationResult[] = []
-    const failures: ClassificationAttempt["failures"] = []
-    for (const batch of [articles.slice(0, middle), articles.slice(middle)]) {
-      try {
-        results.push(...await classifier.classify(batch))
-      } catch (batchError) {
-        failures.push(...batch.map(article => ({ article, error: batchError })))
-      }
+    // Recurse to a single record so one malformed answer does not fail its neighbors.
+    const left = await classifyWithSmallerRetry(classifier, articles.slice(0, middle))
+    const right = await classifyWithSmallerRetry(classifier, articles.slice(middle))
+    return {
+      results: [...left.results, ...right.results],
+      failures: [...left.failures, ...right.failures],
     }
-    return { results, failures }
   }
 }
 
