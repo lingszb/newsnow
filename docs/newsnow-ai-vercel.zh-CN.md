@@ -55,7 +55,7 @@ AGENT_OPENROUTER_API_KEY=
 
 1. 导入 `lingszb/newsnow`，测试时选择本开发分支 `feat/newsnow-ai-jev-classifier`，或者先通过 PR 创建 Preview。
 2. Framework Preset: **Vite**。仓库的 `vercel.json` 已提供 `buildCommand`、`outputDirectory` 和 SPA 回退。
-3. Build Command: `pnpm run build:vercel`；Output Directory: `dist`。
+3. Build Command: `pnpm run build:vercel`；Output Directory: `dist`。SPA fallback 已排除 `/api/*`。
 4. 在 Project Settings → Environment Variables 填写：
 
    ```dotenv
@@ -63,10 +63,10 @@ AGENT_OPENROUTER_API_KEY=
    ```
 
    该变量仅供 Vercel Function 使用，不是前端 `VITE_*` 变量；不要填后台 API Key。
-5. 部署后检查 `/`、`/industry` 和 `/api/latest`。若后端尚未恢复，前端可打开，但代理会返回 502 / 503。
-6. 将 GitHub OAuth 回调改为新站点域名并验证登录与鉴权（如启用登录）。
+5. 部署后检查 `/`、`/industry/tech` 和 `/api/latest`。`/api/latest` 应返回 JSON，不是前端 HTML。后端未恢复时代理会返回 502 / 503。
+6. Agent 要求 GitHub OAuth 登录与持久化配额：后端设置 `G_CLIENT_ID`、`G_CLIENT_SECRET`、`JWT_SECRET`，新站点回调使用 `https://Vercel域名/api/oauth/github`。后端 SQLite 对每个用户限制 12 次/分钟、200 次/天。
 
-> 后端必须具有公网可达的 HTTPS 入口才能被 Vercel 函数访问，但 **MCP 端点不能因此公开**。配置防火墙、反向代理路由和限流，只让非 MCP HTTP API 对外提供服务。最好添加服务间认证和独立的公共 API 网关，再用于真实公网流量。
+> Vercel 代理默认要求 HTTPS 上游。仅在显式设置 `NEWSNOW_ALLOW_HTTP_LOCAL_DEV=true` 且后端为 localhost 等回环地址时允许 HTTP。后端需要可从 Vercel 访问的 HTTPS 入口，但 **MCP 端点不能因此公开**。配置防火墙、反向代理路由和限流，只让非 MCP HTTP API 对外提供服务。最好添加服务间认证和独立的公共 API 网关，再用于真实公网流量。
 
 ## 3. 功能验收
 
@@ -83,9 +83,13 @@ curl -fsS https://你的vercel域名/api/industry-status
 Agent 测试：
 
 ```bash
-curl -fsS https://你的vercel域名/api/agent/chat \
+# 未登录：预期 401 / 506，不调用付费模型
+curl -i -X POST https://你的vercel域名/api/agent/chat \
   -H 'Content-Type: application/json' \
   --data '{"messages":[{"role":"user","content":"总结最近科技热点"}],"industryPath":"tech"}'
+
+# 登录成功后：请求带 Authorization: Bearer <登录态 JWT>
+# 也可通过 articleId=64位新闻 ID 来固定“AI 解读”目标
 ```
 
 当行业分类队列为空、且行业新闻已入库时，应返回 `answer` 和来源数组 `sources`；没有分类数据时会提示尚无可用新闻，而不是编造答案。
@@ -97,7 +101,7 @@ curl -fsS https://你的vercel域名/api/agent/chat \
 - **JEV confidence 不是分类正确率**。现有分类阈值 0.60 延续原方案，必须用人工标注样本校准。
 - 来源链接有效性与文章摘要覆盖度，检查 Agent 是否引用了与答案对应的新闻。
 - Vercel Function 转发请求体、Cookies、鉴权 Header 和返回流的兼容性。
-- 线上 Agent 调用限流、滥用防护、费用预算与日志脱敏。现有每进程软限流不能替代正式的网关限流。
+- Agent 使用 SQLite 按登录用户持久配额限制 12 次/分钟、200 次/天；上线前还需确认 OAuth 回调、费用预算、日志脱敏及公网网关限流。
 - 移动端侧边栏、深色模式、行业路由深链和 PWA 缓存。
 - GitHub OAuth 新域名回调验证。
 
