@@ -15,16 +15,26 @@ export default async function handler(req, res) {
   let base
   try {
     base = new URL(origin)
-    if (!["https:", "http:"].includes(base.protocol)) throw new Error("Invalid protocol")
+    const isDevLoopback = process.env.NEWSNOW_ALLOW_HTTP_LOCAL_DEV === "true"
+      && base.protocol === "http:"
+      && ["127.0.0.1", "localhost", "[::1]"].includes(base.hostname)
+    if (base.protocol !== "https:" && !isDevLoopback) throw new Error("HTTPS backend required")
   } catch {
     res.status(503).json({ message: "Invalid NEWSNOW_BACKEND_URL" })
     return
   }
 
   const incoming = new URL(req.url || "/api", "http://localhost")
-  if (!incoming.pathname.startsWith("/api/")
-      || incoming.pathname === "/api/mcp"
-      || incoming.pathname.startsWith("/api/mcp/")) {
+  let normalizedPath
+  try {
+    normalizedPath = decodeURIComponent(incoming.pathname).replace(/\/+$/, "").toLowerCase()
+  } catch {
+    res.status(400).end()
+    return
+  }
+  if (!normalizedPath.startsWith("/api/")
+      || normalizedPath === "/api/mcp"
+      || normalizedPath.startsWith("/api/mcp/")) {
     // Never publish the private MCP transport through the Vercel proxy.
     res.status(404).end()
     return
