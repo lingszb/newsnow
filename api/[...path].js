@@ -22,7 +22,10 @@ export default async function handler(req, res) {
   }
 
   const incoming = new URL(req.url || "/api", "http://localhost")
-  if (!incoming.pathname.startsWith("/api/")) {
+  if (!incoming.pathname.startsWith("/api/")
+      || incoming.pathname === "/api/mcp"
+      || incoming.pathname.startsWith("/api/mcp/")) {
+    // Never publish the private MCP transport through the Vercel proxy.
     res.status(404).end()
     return
   }
