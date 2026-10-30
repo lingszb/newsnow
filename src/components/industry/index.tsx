@@ -211,6 +211,13 @@ function NewsRow({
           </time>
         </span>
       </a>
+      <button
+        type="button"
+        className="mt-2 text-xs px-2 py-1 rounded-md color-primary hover:bg-primary/10 cursor-pointer"
+        onClick={() => window.dispatchEvent(new CustomEvent("newsnow:ask", { detail: { id: item.id, title: item.title } }))}
+      >
+        AI 解读
+      </button>
     </article>
   )
 }

@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
     if (publicPaths.every(p => !url.pathname.startsWith(p)))
       throw createError({ statusCode: 506, message: "Server not configured, disable login" })
   } else {
-    if (["/api/s", "/api/me", "/api/settings"].find(p => url.pathname.startsWith(p))) {
+    if (["/api/s", "/api/me", "/api/settings", "/api/agent"].find(p => url.pathname.startsWith(p))) {
       const token = getHeader(event, "Authorization")?.replace(/Bearer\s*/, "")?.trim()
       if (token) {
         try {
@@ -31,11 +31,11 @@ export default defineEventHandler(async (event) => {
             }
           }
         } catch {
-          if (url.pathname.startsWith("/api/me"))
+          if (url.pathname.startsWith("/api/me") || url.pathname.startsWith("/api/agent"))
             throw createError({ statusCode: 401, message: "JWT verification failed" })
           else logger.warn("JWT verification failed")
         }
-      } else if (url.pathname.startsWith("/api/me")) {
+      } else if (url.pathname.startsWith("/api/me") || url.pathname.startsWith("/api/agent")) {
         throw createError({ statusCode: 401, message: "JWT verification failed" })
       }
     }

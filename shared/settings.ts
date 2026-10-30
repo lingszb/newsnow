@@ -24,6 +24,7 @@ export interface NewsSettingsResponse {
     enabled: boolean
     configured: boolean
     model: string
+    provider: "qwen" | "jev"
     version: string
   }
   industries: IndustryDefinition[]

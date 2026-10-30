@@ -5,6 +5,8 @@ import type { IndustryCode, IndustryDefinition } from "@shared/industry"
 import type { NewsRepository, PendingArticle } from "#/database/news"
 import { getNewsRepository } from "#/database/news"
 import { getNewsSettingsRepository } from "#/database/settings"
+import { JevNewsClassifier } from "./jev-news-classifier"
+import { ClassifierArticleIdError, ClassifierTimeoutError, SplittableClassifierError } from "./classifier-errors"
 
 const BATCH_SIZE = 20
 const CONFIDENCE_THRESHOLD = 0.60
@@ -13,12 +15,8 @@ const MIN_TIMEOUT_MS = 1_000
 const MAX_TIMEOUT_MS = 120_000
 const DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 const DEFAULT_MODEL = "qwen3.6-flash-2026-04-16"
-
-class SplittableClassifierError extends Error {}
-
-class ClassifierArticleIdError extends SplittableClassifierError {}
-
-class ClassifierTimeoutError extends SplittableClassifierError {}
+const JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
+const JEV_MODEL = "typesafe/jev-1.14"
 
 interface ChatCompletionResponse {
   choices?: Array<{
@@ -29,6 +27,7 @@ interface ChatCompletionResponse {
 }
 
 export interface ClassifierConfig {
+  provider?: "qwen" | "jev"
   enabled: boolean
   endpoint: string
   apiKey?: string
@@ -73,11 +72,19 @@ function nonThinkingRequestOptions(model: string) {
 }
 
 export function getClassifierConfig(): ClassifierConfig {
+  const provider = process.env.NEWS_CLASSIFIER_PROVIDER === "jev" ? "jev" : "qwen"
   return {
+    provider,
     enabled: process.env.NEWS_CLASSIFIER_ENABLED === "true",
-    endpoint: process.env.NEWS_CLASSIFIER_ENDPOINT?.trim() || DEFAULT_ENDPOINT,
-    apiKey: process.env.NEWS_CLASSIFIER_API_KEY?.trim() || undefined,
-    model: process.env.NEWS_CLASSIFIER_MODEL?.trim() || DEFAULT_MODEL,
+    endpoint: provider === "jev"
+      ? process.env.NEWS_JEV_ENDPOINT?.trim() || JEV_ENDPOINT
+      : process.env.NEWS_CLASSIFIER_ENDPOINT?.trim() || DEFAULT_ENDPOINT,
+    apiKey: provider === "jev"
+      ? process.env.NEWS_JEV_API_KEY?.trim() || process.env.OPENROUTER_API_KEY?.trim() || undefined
+      : process.env.NEWS_CLASSIFIER_API_KEY?.trim() || undefined,
+    model: provider === "jev"
+      ? process.env.NEWS_JEV_MODEL?.trim() || JEV_MODEL
+      : process.env.NEWS_CLASSIFIER_MODEL?.trim() || DEFAULT_MODEL,
     timeoutMs: classifierTimeoutMs(),
   }
 }
@@ -88,7 +95,7 @@ export async function getResolvedClassifierConfig(): Promise<ClassifierConfig> {
   return {
     ...config,
     enabled: await settings.getClassifierEnabled(config.enabled),
-    model: await settings.getClassifierModel(config.model),
+    model: config.provider === "jev" ? config.model : await settings.getClassifierModel(config.model),
   }
 }
 
@@ -235,23 +242,17 @@ async function classifyWithSmallerRetry(
     }
   } catch (error) {
     if (!(error instanceof SplittableClassifierError) || articles.length < 2) {
-      return {
-        results: [],
-        failures: articles.map(article => ({ article, error })),
-      }
+      return { results: [], failures: articles.map(article => ({ article, error })) }
     }
 
     const middle = Math.ceil(articles.length / 2)
-    const results: ClassificationResult[] = []
-    const failures: ClassificationAttempt["failures"] = []
-    for (const batch of [articles.slice(0, middle), articles.slice(middle)]) {
-      try {
-        results.push(...await classifier.classify(batch))
-      } catch (batchError) {
-        failures.push(...batch.map(article => ({ article, error: batchError })))
-      }
+    // Recurse to a single record so one malformed answer does not fail its neighbors.
+    const left = await classifyWithSmallerRetry(classifier, articles.slice(0, middle))
+    const right = await classifyWithSmallerRetry(classifier, articles.slice(middle))
+    return {
+      results: [...left.results, ...right.results],
+      failures: [...left.failures, ...right.failures],
     }
-    return { results, failures }
   }
 }
 
@@ -318,7 +319,9 @@ export function requestClassificationProcessing() {
       if (!config.enabled || !config.apiKey) continue
       const repository = await getNewsRepository()
       const definitions = await getResolvedIndustryDefinitions()
-      const classifier = new QwenNewsClassifier(config, fetch, definitions)
+      const classifier: NewsClassifier = config.provider === "jev"
+        ? new JevNewsClassifier(config, fetch, definitions)
+        : new QwenNewsClassifier(config, fetch, definitions)
       const fallbackIndustry = definitions.find(item => item.code === "OTHER")?.code
         ?? definitions.at(-1)?.code
         ?? "OTHER"

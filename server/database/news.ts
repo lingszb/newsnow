@@ -413,7 +413,8 @@ export class NewsRepository {
       SET industry_code = NULL, confidence = NULL
       WHERE industry_code = ? AND status = 'CLASSIFIED'
     `).run(code)
-    return Number(result.changes ?? result.meta?.changes ?? 0)
+    const driverResult = result as { changes?: number, meta?: { changes?: number } }
+    return Number(driverResult.changes ?? driverResult.meta?.changes ?? 0)
   }
 
   async industryCounts(
@@ -517,6 +518,35 @@ export class NewsRepository {
           OR (published_at IS NOT NULL AND published_at > 0 AND published_at < ?)`,
     ).run(threshold, threshold) as { changes?: number, meta?: { changes?: number } }
     return Number(result.changes ?? result.meta?.changes ?? 0)
+  }
+
+  /** Resolve a clicked industry-news item by immutable server-side ID. */
+  async getIndustryArticleById(id: string): Promise<IndustryArticle | undefined> {
+    const row = await this.db.prepare(`
+      SELECT
+        a.id, a.source_id, a.title, a.url, a.mobile_url, a.summary,
+        a.published_at, a.first_seen_at, a.source_rank,
+        c.industry_code, c.confidence
+      FROM news_article a
+      JOIN news_classification c ON c.article_id = a.id
+      WHERE a.id = ? AND c.status = 'CLASSIFIED'
+      LIMIT 1
+    `).get(id) as IndustryArticleRow | undefined
+    if (!row) return undefined
+    return {
+      id: row.id,
+      sourceId: row.source_id,
+      sourceName: sources[row.source_id]?.name ?? row.source_id,
+      sourceTitle: sources[row.source_id]?.title,
+      title: row.title,
+      url: row.url,
+      mobileUrl: row.mobile_url ?? undefined,
+      summary: row.summary ?? undefined,
+      publishedAt: Number(row.published_at ?? row.first_seen_at),
+      rank: Number(row.source_rank),
+      industry: row.industry_code,
+      confidence: Number(row.confidence),
+    }
   }
 
   async getArticle(sourceId: SourceID, sourceItemId: string) {
